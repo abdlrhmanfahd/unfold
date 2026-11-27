@@ -291,6 +291,80 @@ class ExtractorWorkerTests(unittest.TestCase):
         self.assertIn("speed_mps: min=0.2, mean=0.4, max=0.6, last=0.6", ctx)
         self.assertIn("DEEP_PARAM_GAIN = 2.75", ctx)
 
+    def test_merge_with_skeleton_rejects_hallucinated_files_and_preserves_ast_subsystems(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("report.pdf", b"%PDF-1.4\nstream\nBT\n(Obstacle Detection Study)\nET\nendstream\n%%EOF")
+            z.writestr("src/a8_lidar.py", '"""Processes 2D LiDAR scans."""\nRANGE_M = 2.0\n')
+            z.writestr("src/a8_run.py", '"""Vehicle speed and stop-release control."""\nimport a8_lidar\nMAX_V = 0.5\n')
+            z.writestr("logs/speed.csv", "t,v_meas,v_ref\n0.0,0.1,0.5\n0.1,0.5,0.5\n")
+            z.writestr("figures/plot1.png", b"PNGDATA")
+        files = [
+            {"path": "report.pdf", "size": 100, "kind": "report", "blocked": False},
+            {"path": "src/a8_lidar.py", "size": 50, "kind": "code", "blocked": False},
+            {"path": "src/a8_run.py", "size": 60, "kind": "code", "blocked": False},
+            {"path": "logs/speed.csv", "size": 50, "kind": "data", "blocked": False},
+            {"path": "figures/plot1.png", "size": 7, "kind": "image", "blocked": False},
+        ]
+        skel, _ = uw.local_rules_extract(buf.getvalue(), files, "report.pdf")
+        stub_ai = {
+            "meta": {
+                "title": "Object Detection and Safe Stopping",
+                "question": "Can software fix bent wheels?",
+                "short_description": "Continuous clear observation before releasing a stop.",
+            },
+            "subsystems": [
+                {
+                    "id": "perception",
+                    "name": "Perception",
+                    "plain": "Detects obstacles.",
+                    "on": ["lidar"],
+                    "category": "perception",
+                    "method": "Algorithm or null",
+                    "code_files": ["file.py"],
+                }
+            ],
+            "connections": [],
+            "data_files": [{"file": "runs.csv", "format": "csv", "columns": [{"name": "time", "unit": "s"}]}],
+            "results": {
+                "metrics": [{"metric": "Metric 1", "value": {"value": 1, "source_ref": "p. 1", "status": "extracted"}, "unit": "%"}],
+                "media": [{"file": "plot.png", "caption": "Caption", "part": None}],
+                "limitations": ["Limitation 1"],
+                "future_work": ["Future improvement 1"],
+            },
+        }
+        merged = uw.merge_with_skeleton(stub_ai, skel, files=files)
+        self.assertIsNone(merged["meta"]["question"])
+        sub_ids = {s["id"] for s in merged["subsystems"]}
+        self.assertIn("perception", sub_ids)
+        self.assertIn("control", sub_ids)
+        perc = next(s for s in merged["subsystems"] if s["id"] == "perception")
+        self.assertIsNone(perc["method"])
+        self.assertNotIn("file.py", perc["code_files"])
+        self.assertEqual(perc["code_files"], ["src/a8_lidar.py"])
+        self.assertTrue(len(merged["connections"]) > 0)
+        self.assertEqual([df["file"] for df in merged["data_files"]], ["speed.csv"])
+        self.assertEqual([m["file"] for m in merged["results"]["media"]], ["plot1.png"])
+        self.assertEqual(merged["results"]["limitations"], [])
+        self.assertEqual(merged["results"]["future_work"], [])
+        self.assertEqual(merged["results"]["metrics"], [])
+
+    def test_ollama_json_preserves_context_alongside_long_report(self):
+        long_report = "<report name=\"report.pdf\">\n" + ("R" * 12_500) + "\n</report>"
+        context_part = "Inventory and stats:\n" + ("C" * 500) + "\nEND_CONTEXT_MARKER"
+        fake_resp = mock.Mock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {
+            "message": {"content": '{"schema_version": "0.2"}'},
+            "prompt_eval_count": 100,
+            "eval_count": 10,
+        }
+        with mock.patch.object(uw.requests, "post", return_value=fake_resp) as post:
+            client = uw.LLMClient("ollama")
+            client.ask_json("sys", [{"type": "text", "text": long_report}, {"type": "text", "text": context_part}])
+            sent_user = post.call_args.kwargs["json"]["messages"][1]["content"]
+            self.assertIn("END_CONTEXT_MARKER", sent_user)
+
 
 if __name__ == "__main__":
     unittest.main()
