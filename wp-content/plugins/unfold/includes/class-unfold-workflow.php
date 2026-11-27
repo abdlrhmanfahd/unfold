@@ -264,7 +264,7 @@ class Unfold_Workflow {
 	/**
 	 * Finish an upload: validate the ZIP, create or update the project, queue extraction.
 	 */
-	public static function finish_upload( $upload_id, $post_id = 0 ) {
+	public static function finish_upload( $upload_id, $post_id = 0, $ai = null ) {
 		$u = get_transient( 'unfold_upload_' . $upload_id );
 		if ( ! $u || (int) $u['user'] !== get_current_user_id() || ! empty( $u['world'] ) ) {
 			return new WP_Error( 'unfold_upload', __( 'Upload not found or expired.', 'unfold' ), array( 'status' => 404 ) );
@@ -309,6 +309,7 @@ class Unfold_Workflow {
 		update_post_meta( $post_id, '_unfold_zip_name', $u['name'] );
 		update_post_meta( $post_id, '_unfold_report', $manifest['report_guess'] );
 		self::log( $post_id, 'upload', $u['name'], array( 'bytes' => $u['size'], 'files' => count( $manifest['files'] ) ) );
+		Unfold_AI::save_project_choice( $post_id, $ai, get_current_user_id() );
 		self::queue_extraction( $post_id );
 		return $post_id;
 	}

@@ -33,6 +33,7 @@ require_once UNFOLD_DIR . 'includes/class-unfold-worlds.php';
 require_once UNFOLD_DIR . 'includes/class-unfold-render.php';
 require_once UNFOLD_DIR . 'includes/class-unfold-frontend.php';
 require_once UNFOLD_DIR . 'includes/class-unfold-admin.php';
+require_once UNFOLD_DIR . 'includes/class-unfold-ai.php';
 require_once UNFOLD_DIR . 'includes/class-unfold-settings.php';
 require_once UNFOLD_DIR . 'includes/class-unfold-accounts.php';
 require_once UNFOLD_DIR . 'includes/class-unfold-workflow.php';

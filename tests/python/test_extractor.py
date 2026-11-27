@@ -99,6 +99,53 @@ class ExtractorWorkerTests(unittest.TestCase):
                 self.assertTrue(res["local"])
                 self.assertEqual(meta["usage"]["output_tokens"], 20)
 
+    def test_per_job_credentials_override_environment(self):
+        fake_resp = mock.Mock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {
+            "choices": [{"message": {"content": '{"schema_version": "0.2", "byok": true}'}}],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 12},
+        }
+        with mock.patch.dict(os.environ, {"UNFOLD_AI_API_KEY": "env-key", "UNFOLD_AI_BASE_URL": "https://env.example/v1"}):
+            with mock.patch.object(uw.requests, "post", return_value=fake_resp) as post:
+                client = uw.LLMClient(
+                    provider="openai_compat",
+                    model="gpt-4o-mini",
+                    api_key="job-secret-key",
+                    base_url="https://api.openai.com/v1/",
+                )
+                res, meta = client.ask_json("sys", [{"type": "text", "text": "hello"}])
+                self.assertTrue(res["byok"])
+                self.assertEqual(meta["model"], "gpt-4o-mini")
+                self.assertEqual(post.call_args.args[0], "https://api.openai.com/v1/chat/completions")
+                self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer job-secret-key")
+
+    def test_handle_switches_to_local_rules_for_quick_extract_job(self):
+        raw_zip, files = make_sample_zip()
+        files[0]["path"] = "report.pdf"
+        buf = io.BytesIO(raw_zip)
+        with zipfile.ZipFile(buf, "a") as z:
+            z.writestr("report.pdf", b"%PDF-1.4 (Quick Test) %%EOF")
+
+        fake_site = mock.Mock()
+        fake_site.zip.return_value = buf.getvalue()
+        fake_site.result.return_value = {"schema_errors": [], "attached": 1}
+
+        default_client = uw.LLMClient(provider="gemini", api_key="never-used")
+        job = {
+            "job_id": "job-1",
+            "project_id": 99,
+            "report": "report.pdf",
+            "files": files,
+            "schema": {},
+            "ai": {"provider": "local_rules", "model": "local_rules", "base_url": "", "api_key": ""},
+        }
+        uw.handle(fake_site, default_client, job)
+        self.assertTrue(fake_site.result.called)
+        payload = fake_site.result.call_args.args[1]
+        self.assertEqual(payload["meta"]["model"], "local_rules")
+        self.assertEqual(payload["data"]["schema_version"], "0.2")
+
 
 if __name__ == "__main__":
     unittest.main()

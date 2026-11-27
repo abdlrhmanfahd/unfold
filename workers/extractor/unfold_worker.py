@@ -452,9 +452,11 @@ def local_rules_extract(zip_bytes: bytes, files: list[dict], report: str | None)
 class LLMClient:
     """Unified client supporting free Gemini, local Ollama, OpenAI-compatible endpoints, local rules, or optional Anthropic."""
 
-    def __init__(self, provider: str | None = None):
+    def __init__(self, provider: str | None = None, model: str | None = None, api_key: str | None = None, base_url: str | None = None):
         self.provider = (provider or os.environ.get("UNFOLD_AI_PROVIDER") or self.detect_provider()).strip().lower()
-        self.model = self._resolve_model()
+        self.api_key = (api_key or "").strip() or None
+        self.base_url = (base_url or "").strip().rstrip("/") or None
+        self.model = self._resolve_model(model)
 
     @staticmethod
     def detect_provider() -> str:
@@ -477,8 +479,8 @@ class LLMClient:
                 pass
         return "local_rules"
 
-    def _resolve_model(self) -> str:
-        override = os.environ.get("UNFOLD_AI_MODEL")
+    def _resolve_model(self, model_override: str | None = None) -> str:
+        override = (model_override or "").strip() or os.environ.get("UNFOLD_AI_MODEL")
         if override:
             return override
         if self.provider == "gemini":
@@ -492,7 +494,7 @@ class LLMClient:
         return "local_rules"
 
     def _gemini_json(self, system: str, parts: list[dict], max_tokens: int) -> tuple[dict, dict]:
-        key = os.environ.get("GEMINI_API_KEY") or read_secret_file("gemini-key.txt")
+        key = self.api_key or os.environ.get("GEMINI_API_KEY") or read_secret_file("gemini-key.txt")
         if not key:
             raise RuntimeError("Missing GEMINI_API_KEY (or gemini-key.txt). Get a free key from Google AI Studio.")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
@@ -541,7 +543,7 @@ class LLMClient:
         raise RuntimeError("unreachable")
 
     def _ollama_json(self, system: str, parts: list[dict]) -> tuple[dict, dict]:
-        base = os.environ.get("UNFOLD_OLLAMA_URL", DEFAULT_OLLAMA_URL).rstrip("/")
+        base = (self.base_url or os.environ.get("UNFOLD_OLLAMA_URL", DEFAULT_OLLAMA_URL)).rstrip("/")
         text_chunks = []
         for p in parts:
             if p["type"] == "pdf":
@@ -578,8 +580,8 @@ class LLMClient:
         raise RuntimeError("unreachable")
 
     def _openai_compat_json(self, system: str, parts: list[dict], max_tokens: int) -> tuple[dict, dict]:
-        base = (os.environ.get("UNFOLD_AI_BASE_URL") or "https://api.groq.com/openai/v1").rstrip("/")
-        key = os.environ.get("UNFOLD_AI_API_KEY") or read_secret_file("ai-key.txt") or ""
+        base = (self.base_url or os.environ.get("UNFOLD_AI_BASE_URL") or "https://api.groq.com/openai/v1").rstrip("/")
+        key = self.api_key or os.environ.get("UNFOLD_AI_API_KEY") or read_secret_file("ai-key.txt") or ""
         text_chunks = []
         for p in parts:
             if p["type"] == "pdf":
@@ -618,7 +620,7 @@ class LLMClient:
 
     def _anthropic_json(self, system: str, parts: list[dict], max_tokens: int) -> tuple[dict, dict]:
         import anthropic  # optional legacy fallback
-        key = os.environ.get("ANTHROPIC_API_KEY") or read_secret_file("anthropic-key.txt")
+        key = self.api_key or os.environ.get("ANTHROPIC_API_KEY") or read_secret_file("anthropic-key.txt")
         client = anthropic.Anthropic(max_retries=3, api_key=key) if key else anthropic.Anthropic(max_retries=3)
         content = []
         for p in parts:
@@ -809,10 +811,19 @@ class Site:
 
 
 def handle(site: Site, client: LLMClient, job: dict) -> None:
-    log.info("job %s for project %s (provider=%s, model=%s)", job["job_id"], job["project_id"], client.provider, client.model)
+    active_client = client
+    job_ai = job.get("ai")
+    if isinstance(job_ai, dict) and job_ai.get("provider"):
+        active_client = LLMClient(
+            provider=job_ai.get("provider"),
+            model=job_ai.get("model") or None,
+            api_key=job_ai.get("api_key") or None,
+            base_url=job_ai.get("base_url") or None,
+        )
+    log.info("job %s for project %s (provider=%s, model=%s)", job["job_id"], job["project_id"], active_client.provider, active_client.model)
     try:
         zip_bytes = site.zip(job)
-        data, meta = extract_project(client, zip_bytes, job["files"], job.get("report"), job["schema"])
+        data, meta = extract_project(active_client, zip_bytes, job["files"], job.get("report"), job["schema"])
     except (ValueError, RuntimeError, json.JSONDecodeError, KeyError, zipfile.BadZipFile, requests.RequestException) as e:
         log.exception("extraction failed")
         site.result(job, {"error": str(e)[:400]})
@@ -821,7 +832,7 @@ def handle(site: Site, client: LLMClient, job: dict) -> None:
     log.info("done: %s output tokens, %d schema problems, %d files attached",
              meta["usage"]["output_tokens"], len(res.get("schema_errors", [])), res.get("attached", 0))
     try:
-        score = brief_score(client, zip_bytes, job["files"], job.get("report"), (data.get("meta") or {}).get("title") or "")
+        score = brief_score(active_client, zip_bytes, job["files"], job.get("report"), (data.get("meta") or {}).get("title") or "")
         if score:
             r = site.s.post(site.route(f"/worker/projects/{job['project_id']}/brief-score"), json=score, timeout=60)
             r.raise_for_status()

@@ -27,6 +27,10 @@ class Unfold_Rest {
 		$worker   = array( __CLASS__, 'worker_auth' );
 		$id_arg   = array( 'id' => array( 'validate_callback' => static function ( $v ) { return is_numeric( $v ); } ) );
 
+		// Member AI preferences (permanent BYOK & extraction mode).
+		register_rest_route( self::NS, '/me/ai', array( 'methods' => 'GET', 'callback' => array( __CLASS__, 'me_ai_get' ), 'permission_callback' => $member ) );
+		register_rest_route( self::NS, '/me/ai', array( 'methods' => 'PUT', 'callback' => array( __CLASS__, 'me_ai_save' ), 'permission_callback' => $member ) );
+
 		// Uploads (chunked).
 		register_rest_route( self::NS, '/uploads', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'upload_start' ), 'permission_callback' => $member ) );
 		register_rest_route( self::NS, '/uploads/(?P<uid>[a-f0-9]{32})', array( 'methods' => 'PUT', 'callback' => array( __CLASS__, 'upload_chunk' ), 'permission_callback' => $member ) );
@@ -66,8 +70,30 @@ class Unfold_Rest {
 		return Unfold_Workflow::put_chunk( $r['uid'], (int) $r->get_param( 'offset' ), $r->get_body() );
 	}
 
+	public static function me_ai_get() {
+		return Unfold_AI::get_user_config( get_current_user_id() );
+	}
+
+	public static function me_ai_save( WP_REST_Request $r ) {
+		$params = $r->get_json_params();
+		if ( ! is_array( $params ) ) {
+			$params = $r->get_params();
+		}
+		return Unfold_AI::save_user_config( get_current_user_id(), is_array( $params ) ? $params : array() );
+	}
+
+	private static function extract_ai_param( WP_REST_Request $r ) {
+		$body = $r->get_json_params();
+		$ai   = is_array( $body['ai'] ?? null ) ? $body['ai'] : ( is_array( $r['ai'] ?? null ) ? $r['ai'] : null );
+		if ( is_array( $ai ) && ( 'byok' === sanitize_key( (string) ( $ai['mode'] ?? '' ) ) || array_key_exists( 'api_key', $ai ) || array_key_exists( 'provider', $ai ) || ! empty( $ai['clear_key'] ) ) ) {
+			Unfold_AI::save_user_config( get_current_user_id(), $ai );
+		}
+		return $ai;
+	}
+
 	public static function upload_complete( WP_REST_Request $r ) {
-		$id = Unfold_Workflow::finish_upload( $r['uid'], absint( $r['project'] ?? 0 ) );
+		$ai = self::extract_ai_param( $r );
+		$id = Unfold_Workflow::finish_upload( $r['uid'], absint( $r['project'] ?? 0 ), $ai );
 		return is_wp_error( $id ) ? $id : self::project_payload( $id );
 	}
 
@@ -174,6 +200,8 @@ class Unfold_Rest {
 			}
 			update_post_meta( $id, '_unfold_report', $report );
 		}
+		$ai = self::extract_ai_param( $r );
+		Unfold_AI::save_project_choice( $id, $ai, get_current_user_id() );
 		Unfold_Workflow::queue_extraction( $id );
 		return self::project_payload( $id );
 	}
@@ -224,6 +252,7 @@ class Unfold_Rest {
 			'files'      => $man['files'],
 			'zip_url'    => rest_url( self::NS . '/worker/jobs/' . $id . '/zip' ),
 			'schema'     => Unfold_Validator::schema(),
+			'ai'         => Unfold_AI::resolve_for_job( $id ),
 		);
 	}
 
