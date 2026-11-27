@@ -7,7 +7,7 @@
     4. Registers Windows Scheduled Tasks so Ollama & both workers start automatically on boot/logon.
 #>
 param(
-    [string]$Model = 'qwen3:14b',
+    [string]$Model = 'auto',
     [string]$SiteUrl = 'http://localhost:8881',
     [switch]$SkipOllama,
     [switch]$SkipTasks,
@@ -17,10 +17,118 @@ param(
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
+function Resolve-LabOllamaModel {
+    param([string]$RequestedModel = 'auto')
+
+    $ramGb = 0.0
+    try {
+        $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+        if ($cs.TotalPhysicalMemory) {
+            $ramGb = [math]::Round(($cs.TotalPhysicalMemory / 1GB), 1)
+        }
+    } catch {}
+
+    $vramGb = 0.0
+    $gpuNames = @()
+
+    # 1. Primary: nvidia-smi (accurate MiB across one or more NVIDIA GPUs; avoids WMI's 4 GB cap).
+    $nvCmd = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    $nvPath = if ($nvCmd) { $nvCmd.Source } elseif (Test-Path 'C:\Windows\System32\nvidia-smi.exe') { 'C:\Windows\System32\nvidia-smi.exe' } elseif (Test-Path 'C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe') { 'C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe' } else { $null }
+    if ($nvPath) {
+        try {
+            $prevPref = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $lines = & $nvPath --query-gpu=name,memory.total --format=csv,noheader,nounits 2>$null
+            $nvExit = $LASTEXITCODE
+            $ErrorActionPreference = $prevPref
+            if ($nvExit -eq 0 -and $lines) {
+                $totalMib = 0.0
+                foreach ($ln in $lines) {
+                    $parts = ($ln -split ',')
+                    if ($parts.Count -ge 2) {
+                        $gpuNames += $parts[0].Trim()
+                        $mib = 0.0
+                        if ([double]::TryParse($parts[-1].Trim(), [System.Globalization.NumberStyles]::Any, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$mib)) {
+                            $totalMib += $mib
+                        }
+                    }
+                }
+                if ($totalMib -gt 0) {
+                    $vramGb = [math]::Round(($totalMib / 1024.0), 1)
+                }
+            }
+        } catch {}
+    }
+
+    # 2. Fallback: 64-bit registry VRAM (covers AMD / Intel Arc or systems without nvidia-smi).
+    if ($vramGb -le 0) {
+        try {
+            $regKeys = Get-ChildItem 'HKLM:\SYSTEM\ControlSet001\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0*' -ErrorAction SilentlyContinue
+            foreach ($rk in $regKeys) {
+                $props = Get-ItemProperty $rk.PSPath -ErrorAction SilentlyContinue
+                if (-not $props) { continue }
+                $desc = [string]$props.DriverDesc
+                $rawMem = $props.'HardwareInformation.qwMemorySize'
+                [uint64]$memBytes = 0
+                if ($rawMem -is [byte[]] -and $rawMem.Length -ge 8) {
+                    $memBytes = [System.BitConverter]::ToUInt64($rawMem, 0)
+                } elseif ($rawMem -is [int64] -or $rawMem -is [uint64] -or $rawMem -is [int32] -or $rawMem -is [uint32]) {
+                    if ([double]$rawMem -gt 0) { $memBytes = [uint64]$rawMem }
+                }
+                if ($desc -and $desc -notin $gpuNames) { $gpuNames += $desc }
+                if ($memBytes -gt 0) {
+                    $gb = [math]::Round(($memBytes / 1GB), 1)
+                    if ($gb -gt $vramGb) { $vramGb = $gb }
+                }
+            }
+        } catch {}
+    }
+
+    $req = if ($RequestedModel) { $RequestedModel.Trim() } else { '' }
+    if (-not $req -or $req -ieq 'auto') {
+        if ($vramGb -ge 20) {
+            $chosen = 'qwen3:32b'
+            $tier = '24 GB+ VRAM - full reasoning'
+        } elseif ($vramGb -ge 11) {
+            $chosen = 'qwen3:14b'
+            $tier = '12-16 GB VRAM - full reasoning'
+        } elseif ($vramGb -ge 6) {
+            $chosen = 'qwen3:8b'
+            $tier = '8 GB VRAM - reasoning'
+        } else {
+            $chosen = 'qwen2.5:3b'
+            $tier = 'CPU-only fallback - consider free Gemini/Groq key for best quality'
+        }
+        $manual = $false
+    } else {
+        $chosen = $req
+        $tier = 'manual override'
+        $manual = $true
+    }
+
+    [pscustomobject]@{
+        Model   = $chosen
+        Tier    = $tier
+        Manual  = $manual
+        VramGb  = $vramGb
+        RamGb   = $ramGb
+        GpuDesc = if ($gpuNames.Count -gt 0) { ($gpuNames -join ', ') } else { 'None detected' }
+    }
+}
+
+$Hw = Resolve-LabOllamaModel -RequestedModel $Model
+$Model = $Hw.Model
+
 Write-Host "=== Unfold Computer Lab Setup ==="
 Write-Host "Repo root : $RepoRoot"
 Write-Host "Site URL  : $SiteUrl"
-Write-Host "Model     : $Model"
+Write-Host "System RAM: $($Hw.RamGb) GB"
+Write-Host "GPU       : $($Hw.GpuDesc) ($($Hw.VramGb) GB VRAM)"
+if ($Hw.Manual) {
+    Write-Host "Model (manual): $Model"
+} else {
+    Write-Host "Model (auto)  : $Model ($($Hw.Tier))"
+}
 
 # 1. Python virtual environments inside repo (portable across machines).
 $pyCmd = Get-Command python -ErrorAction SilentlyContinue
