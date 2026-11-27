@@ -409,6 +409,43 @@ class ExtractorWorkerTests(unittest.TestCase):
                 uw.extract_project(qwen2, buf.getvalue(), files, "report.pdf", schema)
                 self.assertIn("NEVER invent filenames", ask_mock.call_args.args[0])
 
+    def test_enforce_rules_clamps_question_headline_and_dangling_subsystems(self):
+        long_q = (
+            "Does requiring sustained observed clearance before releasing a stop reduce unsafe restarts compared with immediate?"
+        )
+        self.assertGreater(len(long_q), 90)
+        data = {
+            "meta": {
+                "question": long_q,
+                "headline": "Some raw string instead of structured headline",
+            },
+            "subsystems": [
+                {"id": "lidar_detect", "name": "LiDAR Obstacle Detector", "plain": "Detects obstacles reliably along the lane."},
+            ],
+            "connections": [
+                {"from": "lidar_detect", "to": "control", "signal": "distance"},
+            ],
+            "sensors": [
+                {"type": "lidar", "used_by": ["lidar_detect", "control"]},
+            ],
+            "data_files": [
+                {"file": "runs.csv", "subsystem": "control", "format": "csv"},
+            ],
+            "results": {
+                "media": [
+                    {"file": "fig1.png", "part": "ghost"},
+                ],
+            },
+        }
+        out = uw.enforce_rules(data)
+        self.assertLessEqual(len(out["meta"]["question"]), 90)
+        self.assertTrue(out["meta"]["question"].endswith("?"))
+        self.assertIsNone(out["meta"]["headline"])
+        self.assertIsNone(out["data_files"][0]["subsystem"])
+        self.assertIsNone(out["results"]["media"][0]["part"])
+        self.assertEqual(out["connections"], [])
+        self.assertEqual(out["sensors"][0]["used_by"], ["lidar_detect"])
+
 
 if __name__ == "__main__":
     unittest.main()
