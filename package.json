@@ -1,0 +1,16 @@
+{
+  "name": "unfold-checks",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JS syntax, lint, and schema/theme integrity checks for Unfold",
+  "scripts": {
+    "check:syntax": "node tests/js/check-syntax.mjs",
+    "lint": "eslint wp-content/plugins/unfold/assets/js/",
+    "test": "node --test tests/js/*.test.mjs",
+    "check": "npm run check:syntax && npm run lint && npm test"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "globals": "^15.0.0"
+  }
+}
