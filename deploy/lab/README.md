@@ -14,7 +14,7 @@ cd unfold
 
 That single script:
 1. Creates repo-local Python environments (`workers/extractor/.venv`, `workers/world/.venv`) and installs all requirements (`requests`, `pypdf`, `numpy`, `pyfqmr`, etc.).
-2. Installs **Ollama** (via `winget`), starts `ollama serve`, and pulls `qwen2.5:7b` (pass `-Model qwen2.5:14b` if the lab PC has a strong GPU).
+2. Installs **Ollama** (via `winget`), starts `ollama serve`, inspects the PC's GPU VRAM/RAM, and automatically pulls the strongest matching reasoning model (`24 GB+ VRAM -> qwen3:32b`, `12-16 GB VRAM -> qwen3:14b`, `8 GB VRAM -> qwen3:8b`, CPU-only -> `qwen2.5:3b`). Pass `-Model <name>` to override.
 3. Enables the **Lab Local Ollama** preset in WordPress so students can extract projects offline at \$0 cost.
 4. Registers Windows boot auto-start tasks (`Unfold-Ollama`, `Unfold-WorldWorker`, `Unfold-ExtractorWorker`).
 
