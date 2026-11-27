@@ -1000,18 +1000,26 @@ class LLMClient:
         text_chunks = []
         for p in parts:
             if p["type"] == "pdf":
-                text_chunks.append(f'<report name="{p["title"]}">\n{pdf_text(p["bytes"])}\n</report>')
+                text_chunks.append(f'<report name="{p["title"]}">\n{pdf_text(p["bytes"], max_chars=9_000)}\n</report>')
             else:
                 text_chunks.append(p["text"])
+        user_text = "\n\n".join(text_chunks)[:11_000]
         messages = [
             {"role": "system", "content": system},
-            {"role": "user", "content": "\n\n".join(text_chunks)},
+            {"role": "user", "content": user_text},
         ]
+        num_ctx = int(os.environ.get("UNFOLD_OLLAMA_NUM_CTX", "8192"))
         for attempt in (1, 2):
             r = requests.post(
                 f"{base}/api/chat",
-                json={"model": self.model, "messages": messages, "format": "json", "stream": False},
-                timeout=300,
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "format": "json",
+                    "stream": False,
+                    "options": {"num_ctx": num_ctx, "temperature": 0.1},
+                },
+                timeout=600,
             )
             r.raise_for_status()
             body = r.json()
@@ -1138,18 +1146,228 @@ def build_parts(zip_bytes: bytes, files: list[dict], report: str | None) -> list
     return parts
 
 
+_OLLAMA_COMPACT_TEMPLATE = """Answer with ONE valid JSON object using ONLY these top-level keys:
+{
+  "schema_version": "0.2",
+  "meta": {
+    "title": "Short project title",
+    "question": "Short question answered by this project or null",
+    "headline": null,
+    "short_description": "1-2 sentence summary from report",
+    "platform": {"mode": "qlabs_sim", "vehicle_count": {"value": null, "source_ref": null, "status": "extracted"}, "software_stack": ["python"]},
+    "keywords": ["LiDAR", "Obstacle Avoidance"]
+  },
+  "goal": {
+    "problem_statement": "Problem description from report or null",
+    "objectives": ["Objective 1", "Objective 2"],
+    "success_criteria": [{"metric": "Stopping distance", "target": {"value": 1.0, "source_ref": "p. 2", "status": "extracted"}, "unit": "m"}]
+  },
+  "environment": {"scenario": "Scenario description or null", "map_source": "qlabs_builtin", "map_file": null, "obstacles": "static", "other_agents": null},
+  "sensors": [{"type": "lidar", "purpose": "...", "rate_hz": {"value": null, "source_ref": null, "status": "extracted"}, "used_by": ["perception"]}],
+  "subsystems": [{
+    "id": "perception", "name": "Perception", "plain": "Detects obstacles in under 9 words.",
+    "on": ["lidar"], "category": "perception", "description": "2-3 sentence explanation.",
+    "inputs": [], "outputs": [], "method": "Algorithm or null", "equations": [], "parameters": [],
+    "rate_hz": {"value": null, "source_ref": null, "status": "extracted"}, "code_files": ["file.py"], "sim": null
+  }],
+  "connections": [{"from": "perception", "to": "control", "signal": "obstacle state"}],
+  "data_files": [{"file": "runs.csv", "description": null, "subsystem": "control", "format": "csv", "sample_rate_hz": {"value": null, "source_ref": null, "status": "extracted"}, "columns": [{"name": "col", "unit": null}]}],
+  "results": {
+    "metrics": [{"metric": "Success rate", "value": {"value": 95, "source_ref": "p. 5", "status": "extracted"}, "unit": "%", "conditions": null}],
+    "media": [{"file": "plot.png", "caption": "Caption", "part": null}],
+    "limitations": ["Limitation 1"],
+    "future_work": ["Future improvement 1"]
+  }
+}
+Important rules:
+- Use null (or valid enum values) instead of copying placeholder pipes:
+  - meta.platform.mode: "qlabs_sim", "physical_qcar2", "both", or null
+  - environment.map_source: "qlabs_builtin", "custom", "physical_track", "other", or null
+  - environment.obstacles: "static", "dynamic", "both", "none", or null
+  - sensors[].type: "lidar", "rgb_camera", "depth_camera", "imu", "wheel_encoder", or "other"
+- subsystem "name" MUST be 1-3 words; "plain" MUST be 1 short sentence under 10 words; "id" must match ^[a-z][a-z0-9_]*$."""
+
+_VALID_ROOT_KEYS = {"schema_version", "meta", "goal", "environment", "sensors", "subsystems", "connections", "data_files", "results"}
+_VALID_CATEGORIES = {"perception", "localization", "planning", "control", "task_allocation", "fleet_coordination", "communication", "other"}
+_VALID_FORMATS = {"csv", "mat", "bag", "json", "mp4", "other"}
+_VALID_ON = {"chassis", "wheels", "servo", "motor", "encoder", "battery", "board", "imu", "compute", "lidar", "depth", "csi", "lights", "wifi"}
+_VALID_SENSORS = {"lidar", "rgb_camera", "depth_camera", "imu", "wheel_encoder", "other"}
+_VALID_MODES = {"qlabs_sim", "physical_qcar2", "both", None}
+_VALID_STACKS = {"python", "matlab_simulink", "ros2", "other"}
+_VALID_MAP_SOURCES = {"qlabs_builtin", "custom", "physical_track", "other", None}
+_VALID_OBSTACLES = {"static", "dynamic", "both", "none", None}
+
+
+def _deep_merge_prefer_ai(ai_val, skel_val):
+    """Merge dicts preferring non-empty AI values while guaranteeing every required skeleton key exists."""
+    if isinstance(skel_val, dict):
+        if not isinstance(ai_val, dict):
+            return copy.deepcopy(skel_val)
+        if {"value", "status", "source_ref"} <= skel_val.keys():
+            val = ai_val.get("value")
+            if val is None or isinstance(val, bool) or not isinstance(val, (int, float)):
+                return copy.deepcopy(skel_val)
+            return {
+                "value": val,
+                "source_ref": ai_val.get("source_ref") if isinstance(ai_val.get("source_ref"), str) else skel_val.get("source_ref"),
+                "status": "extracted",
+            }
+        out = {}
+        for k, sv in skel_val.items():
+            out[k] = _deep_merge_prefer_ai(ai_val.get(k), sv)
+        return out
+    if isinstance(skel_val, list):
+        return ai_val if isinstance(ai_val, list) and len(ai_val) > 0 else copy.deepcopy(skel_val)
+    if ai_val is not None and ai_val != "":
+        return ai_val
+    return copy.deepcopy(skel_val)
+
+
+def merge_with_skeleton(ai_data: dict, skeleton: dict) -> dict:
+    """Normalize AI output against schema-valid skeleton so partial/small models never produce missing keys."""
+    if not isinstance(ai_data, dict):
+        return copy.deepcopy(skeleton)
+    cleaned = {k: v for k, v in ai_data.items() if k in _VALID_ROOT_KEYS}
+
+    # Rescue fields if a tiny model nested them under a hallucinated wrapper like project_description.
+    if "meta" not in cleaned and isinstance(ai_data.get("project_description"), dict):
+        pd = ai_data["project_description"]
+        cleaned["meta"] = {
+            "title": pd.get("project_name") or pd.get("title"),
+            "short_description": pd.get("project_description") or pd.get("description"),
+        }
+
+    merged: dict = {
+        "schema_version": "0.2",
+        "meta": _deep_merge_prefer_ai(cleaned.get("meta"), skeleton["meta"]),
+        "goal": _deep_merge_prefer_ai(cleaned.get("goal"), skeleton["goal"]),
+        "environment": _deep_merge_prefer_ai(cleaned.get("environment"), skeleton["environment"]),
+    }
+    plat = merged["meta"].get("platform") or {}
+    if plat.get("mode") not in _VALID_MODES:
+        plat["mode"] = skeleton["meta"]["platform"]["mode"]
+    stack = [x for x in (plat.get("software_stack") or []) if x in _VALID_STACKS]
+    plat["software_stack"] = stack if stack else copy.deepcopy(skeleton["meta"]["platform"]["software_stack"])
+    if merged["environment"].get("map_source") not in _VALID_MAP_SOURCES:
+        merged["environment"]["map_source"] = skeleton["environment"]["map_source"]
+    if merged["environment"].get("obstacles") not in _VALID_OBSTACLES:
+        merged["environment"]["obstacles"] = skeleton["environment"]["obstacles"]
+
+    # Normalize subsystems.
+    ai_subs = cleaned.get("subsystems")
+    norm_subs: list[dict] = []
+    if isinstance(ai_subs, list):
+        used_ids: set[str] = set()
+        for raw_s in ai_subs:
+            if not isinstance(raw_s, dict) or not str(raw_s.get("name") or "").strip():
+                continue
+            sid = re.sub(r"[^a-z0-9_]", "_", str(raw_s.get("id") or raw_s.get("name") or "part").lower()).strip("_") or "part"
+            if not sid[0].isalpha():
+                sid = "p_" + sid
+            if sid in used_ids:
+                continue
+            used_ids.add(sid)
+            words = str(raw_s["name"]).strip().split()
+            name = " ".join(words[:3]) if len(words) > 3 else str(raw_s["name"]).strip()
+            plain = str(raw_s.get("plain") or raw_s.get("description") or f"{name} module.").strip()
+            p_words = plain.split()
+            if len(p_words) > 9:
+                plain = " ".join(p_words[:8]).rstrip(".,;:") + "."
+            cat = raw_s.get("category") if raw_s.get("category") in _VALID_CATEGORIES else "other"
+            on_hw = [x for x in (raw_s.get("on") or []) if x in _VALID_ON]
+            norm_subs.append({
+                "id": sid,
+                "name": name,
+                "plain": plain,
+                "on": on_hw,
+                "category": cat,
+                "description": raw_s.get("description") or plain,
+                "inputs": raw_s.get("inputs") if isinstance(raw_s.get("inputs"), list) else [],
+                "outputs": raw_s.get("outputs") if isinstance(raw_s.get("outputs"), list) else [],
+                "method": raw_s.get("method") if isinstance(raw_s.get("method"), str) else None,
+                "equations": [e for e in (raw_s.get("equations") or []) if isinstance(e, str) and e.strip()],
+                "parameters": raw_s.get("parameters") if isinstance(raw_s.get("parameters"), list) else [],
+                "rate_hz": _deep_merge_prefer_ai(raw_s.get("rate_hz"), _tracked_null()),
+                "code_files": [c for c in (raw_s.get("code_files") or []) if isinstance(c, str) and c.strip()],
+                "sim": raw_s.get("sim") if isinstance(raw_s.get("sim"), dict) else None,
+            })
+    merged["subsystems"] = norm_subs if norm_subs else copy.deepcopy(skeleton["subsystems"])
+    valid_sub_ids = {s["id"] for s in merged["subsystems"]}
+
+    # Connections referencing valid subsystems.
+    ai_conns = cleaned.get("connections")
+    norm_conns = [
+        {"from": c["from"], "to": c["to"], "signal": c.get("signal") if isinstance(c.get("signal"), str) else None}
+        for c in (ai_conns if isinstance(ai_conns, list) else [])
+        if isinstance(c, dict) and c.get("from") in valid_sub_ids and c.get("to") in valid_sub_ids
+    ]
+    merged["connections"] = norm_conns if norm_conns else [
+        c for c in skeleton["connections"] if c["from"] in valid_sub_ids and c["to"] in valid_sub_ids
+    ]
+
+    # Sensors.
+    ai_sensors = cleaned.get("sensors")
+    norm_sensors = []
+    if isinstance(ai_sensors, list):
+        for sr in ai_sensors:
+            if not isinstance(sr, dict) or sr.get("type") not in _VALID_SENSORS:
+                continue
+            used_by = [u for u in (sr.get("used_by") or []) if u in valid_sub_ids]
+            norm_sensors.append({
+                "type": sr["type"],
+                "purpose": sr.get("purpose") if isinstance(sr.get("purpose"), str) else None,
+                "rate_hz": _deep_merge_prefer_ai(sr.get("rate_hz"), _tracked_null()),
+                "used_by": used_by,
+            })
+    merged["sensors"] = norm_sensors if norm_sensors else copy.deepcopy(skeleton["sensors"])
+
+    # Data files (guarantee required "format").
+    ai_df = cleaned.get("data_files")
+    norm_df = []
+    if isinstance(ai_df, list):
+        for df in ai_df:
+            if not isinstance(df, dict) or not str(df.get("file") or "").strip():
+                continue
+            fmt = df.get("format") if df.get("format") in _VALID_FORMATS else "csv"
+            sub = df.get("subsystem") if df.get("subsystem") in valid_sub_ids else None
+            cols = [c for c in (df.get("columns") or []) if isinstance(c, dict) and str(c.get("name") or "").strip()]
+            norm_df.append({
+                "file": str(df["file"]).strip(),
+                "description": df.get("description") if isinstance(df.get("description"), str) else None,
+                "subsystem": sub,
+                "format": fmt,
+                "sample_rate_hz": _deep_merge_prefer_ai(df.get("sample_rate_hz"), _tracked_null()),
+                "columns": cols,
+            })
+    merged["data_files"] = norm_df if norm_df else copy.deepcopy(skeleton["data_files"])
+
+    # Results & media (ensure no unknown keys like "type").
+    merged["results"] = _deep_merge_prefer_ai(cleaned.get("results"), skeleton["results"])
+    clean_media = []
+    for m in (merged["results"].get("media") or []):
+        if isinstance(m, dict) and str(m.get("file") or "").strip():
+            part = m.get("part") if m.get("part") in valid_sub_ids else None
+            clean_media.append({"file": str(m["file"]).strip(), "caption": m.get("caption") if isinstance(m.get("caption"), str) else None, "part": part})
+    merged["results"]["media"] = clean_media if clean_media else copy.deepcopy(skeleton["results"]["media"])
+    return merged
+
+
 def extract_project(client: LLMClient, zip_bytes: bytes, files: list[dict], report: str | None, schema: dict) -> tuple[dict, dict]:
     if client.provider == "local_rules":
         return local_rules_extract(zip_bytes, files, report)
+    skeleton, _ = local_rules_extract(zip_bytes, files, report)
     parts = build_parts(zip_bytes, files, report)
-    system = (
-        SYSTEM_PROMPT
-        + "\n\nAnswer with one JSON object and nothing else (no prose, no code fence). It must match this JSON Schema "
-        + "exactly; every property shown is required, use null where the report gives nothing:\n"
-        + json.dumps(output_schema(schema), separators=(",", ":"))
-    )
+    if client.provider == "ollama":
+        system = SYSTEM_PROMPT + "\n\n" + _OLLAMA_COMPACT_TEMPLATE
+    else:
+        system = (
+            SYSTEM_PROMPT
+            + "\n\nAnswer with one JSON object and nothing else (no prose, no code fence). It must match this JSON Schema "
+            + "exactly; every property shown is required, use null where the report gives nothing:\n"
+            + json.dumps(output_schema(schema), separators=(",", ":"))
+        )
     data, meta = client.ask_json(system, parts, max_tokens=65536)
-    return enforce_rules(data), meta
+    return enforce_rules(merge_with_skeleton(data, skeleton)), meta
 
 
 CHECKLIST_PROMPT = """You read an instructor's assignment brief for a university engineering project and list \
@@ -1207,6 +1425,8 @@ def doc_part(z: zipfile.ZipFile, path: str) -> dict:
 
 def brief_score(client: LLMClient, zip_bytes: bytes, files: list[dict], report: str | None, title: str) -> dict | None:
     if client.provider == "local_rules":
+        return None
+    if client.provider == "ollama" and os.environ.get("UNFOLD_OLLAMA_BRIEF", "0") != "1":
         return None
     z = zipfile.ZipFile(io.BytesIO(zip_bytes))
     briefs = find_briefs(files, report)

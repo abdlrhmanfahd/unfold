@@ -148,11 +148,38 @@ class ExtractorWorkerTests(unittest.TestCase):
             "eval_count": 20,
         }
         with mock.patch.dict(os.environ, {"UNFOLD_AI_PROVIDER": "ollama"}):
-            with mock.patch.object(uw.requests, "post", return_value=fake_resp):
+            with mock.patch.object(uw.requests, "post", return_value=fake_resp) as post:
                 client = uw.LLMClient("ollama")
                 res, meta = client.ask_json("sys", [{"type": "text", "text": "hello"}])
                 self.assertTrue(res["local"])
                 self.assertEqual(meta["usage"]["output_tokens"], 20)
+                opts = post.call_args.kwargs["json"]["options"]
+                self.assertGreaterEqual(opts["num_ctx"], 8192)
+                self.assertEqual(opts["temperature"], 0.1)
+
+    def test_merge_with_skeleton_strips_unknown_root_and_fills_required_sections(self):
+        raw_zip, files = make_sample_zip()
+        files[0]["path"] = "report.pdf"
+        buf = io.BytesIO(raw_zip)
+        with zipfile.ZipFile(buf, "a") as z:
+            z.writestr("report.pdf", b"%PDF-1.4\nstream\nBT\n(Autonomous Rover)\nET\nendstream\n%%EOF")
+        skel, _ = uw.local_rules_extract(buf.getvalue(), files, "report.pdf")
+
+        partial_ai = {
+            "project_description": {"project_name": "Autonomous Rover", "project_description": "Clean AI summary."},
+            "goal": {"objectives": ["Avoid obstacles cleanly"]},
+            "environment": {"map_source": "qlabs_builtin|custom|other|null", "obstacles": "static|dynamic|both|none|null"},
+        }
+        merged = uw.merge_with_skeleton(partial_ai, skel)
+        self.assertNotIn("project_description", merged)
+        self.assertEqual(merged["meta"]["title"], "Autonomous Rover")
+        self.assertEqual(merged["meta"]["short_description"], "Clean AI summary.")
+        self.assertEqual(merged["goal"]["objectives"], ["Avoid obstacles cleanly"])
+        self.assertEqual(merged["subsystems"], skel["subsystems"])
+        self.assertEqual(merged["data_files"][0]["format"], "csv")
+        self.assertNotIn("type", merged["results"]["media"][0])
+        self.assertIn(merged["environment"]["map_source"], {"qlabs_builtin", "custom", "physical_track", "other", None})
+        self.assertIn(merged["environment"]["obstacles"], {"static", "dynamic", "both", "none", None})
 
     def test_per_job_credentials_override_environment(self):
         fake_resp = mock.Mock()
