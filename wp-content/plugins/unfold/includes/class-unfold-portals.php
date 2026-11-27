@@ -121,6 +121,7 @@ class Unfold_Portals {
 			return UNFOLD_VERSION . '.' . ( is_file( UNFOLD_DIR . $rel ) ? filemtime( UNFOLD_DIR . $rel ) : 0 );
 		};
 		wp_register_style( 'unfold-portal', UNFOLD_URL . 'assets/css/portal.css', array( 'unfold' ), $v( 'assets/css/portal.css' ) );
+		wp_register_script( 'unfold-auth', UNFOLD_URL . 'assets/js/auth.js', array(), $v( 'assets/js/auth.js' ), array( 'strategy' => 'defer' ) );
 		wp_register_script( 'unfold-form', UNFOLD_URL . 'assets/js/form.js', array( 'unfold-katex-auto' ), $v( 'assets/js/form.js' ), array( 'strategy' => 'defer' ) );
 		wp_register_script( 'unfold-portal', UNFOLD_URL . 'assets/js/portal.js', array( 'unfold-form' ), $v( 'assets/js/portal.js' ), array( 'strategy' => 'defer' ) );
 		wp_register_script( 'unfold-instructor', UNFOLD_URL . 'assets/js/instructor.js', array(), $v( 'assets/js/instructor.js' ), array( 'strategy' => 'defer' ) );

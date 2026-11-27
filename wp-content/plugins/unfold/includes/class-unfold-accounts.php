@@ -261,6 +261,10 @@ class Unfold_Accounts {
 			self::do_resend();
 		} elseif ( 'verify_otp' === $form ) {
 			self::do_verify_otp();
+		} elseif ( 'forgot' === $form ) {
+			self::do_forgot();
+		} elseif ( 'reset' === $form ) {
+			self::do_reset();
 		}
 	}
 
@@ -408,15 +412,91 @@ class Unfold_Accounts {
 		self::flash( 'registered', $email );
 	}
 
+	private static function do_forgot() {
+		if ( ! self::nonce_ok( '_unfold_forgot', 'unfold_forgot' ) ) {
+			self::flash( 'forgot_error', __( 'Your session expired. Please try again.', 'unfold' ) );
+			return;
+		}
+		$login = sanitize_text_field( self::post_str( 'log' ) );
+		if ( '' === $login ) {
+			self::flash( 'forgot_error', __( 'Enter your email address.', 'unfold' ) );
+			return;
+		}
+		$user = is_email( $login ) ? get_user_by( 'email', $login ) : get_user_by( 'login', $login );
+		$sent = false;
+		if ( $user && ! get_transient( 'unfold_reset_req_' . $user->ID ) ) {
+			set_transient( 'unfold_reset_req_' . $user->ID, 1, MINUTE_IN_SECONDS );
+			$key = get_password_reset_key( $user );
+			if ( ! is_wp_error( $key ) ) {
+				$site  = wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES );
+				$link  = Unfold_Portals::url(
+					'login',
+					array(
+						'action' => 'reset',
+						'key'    => $key,
+						'login'  => rawurlencode( $user->user_login ),
+					)
+				);
+				$msg = sprintf(
+					__( "Someone requested a password reset for your account on %1\$s.\n\nTo choose a new password, open this link:\n%2\$s\n\nIf you did not request this, you can safely ignore this email.", 'unfold' ),
+					$site,
+					$link
+				);
+				$sent = wp_mail( $user->user_email, sprintf( __( 'Reset your password for %s', 'unfold' ), $site ), $msg );
+			}
+		}
+		$notice = __( 'If an account matches that email, a password reset link is on its way.', 'unfold' );
+		if ( ! $sent && ! self::smtp_config()['configured'] ) {
+			$notice .= ' ' . __( '(Note: outbound SMTP is not configured on this server yet; ask the lab administrator to configure SMTP in Settings.)', 'unfold' );
+		}
+		self::flash( 'forgot_notice', $notice );
+	}
+
+	private static function do_reset() {
+		if ( ! self::nonce_ok( '_unfold_reset', 'unfold_reset' ) ) {
+			self::flash( 'reset_error', __( 'Your session expired. Please try again.', 'unfold' ) );
+			return;
+		}
+		$key          = sanitize_text_field( self::post_str( 'key' ) );
+		$login        = sanitize_text_field( self::post_str( 'login' ) );
+		$new_pass     = self::post_str( 'new_pass' );
+		$confirm_pass = self::post_str( 'confirm_pass' );
+
+		if ( strlen( $new_pass ) < 8 ) {
+			self::flash( 'reset_error', __( 'Choose a password of at least 8 characters.', 'unfold' ) );
+			return;
+		}
+		if ( $new_pass !== $confirm_pass ) {
+			self::flash( 'reset_error', __( 'The two passwords do not match.', 'unfold' ) );
+			return;
+		}
+		$user = check_password_reset_key( $key, $login );
+		if ( is_wp_error( $user ) ) {
+			self::flash( 'reset_error', __( 'This password reset link is invalid or has expired. Request a new one.', 'unfold' ) );
+			return;
+		}
+		reset_password( $user, $new_pass );
+		wp_safe_redirect( Unfold_Portals::url( 'login', array( 'reset' => '1' ) ) );
+		exit;
+	}
+
 	/* ---------------------------------------------------------------------
 	 * Shortcodes
 	 * ------------------------------------------------------------------ */
 
 	private static function card( $title, $intro, $body, $foot ) {
 		wp_enqueue_style( 'unfold-portal' );
+		wp_enqueue_script( 'unfold-auth' );
 		return '<div class="unfold uf-auth"><div class="uf-auth-card"><h1 class="uf-auth-title">' . esc_html( $title ) . '</h1>'
 			. ( $intro ? '<p class="uf-auth-intro">' . esc_html( $intro ) . '</p>' : '' ) . $body
 			. ( $foot ? '<p class="uf-auth-foot">' . $foot . '</p>' : '' ) . '</div></div>';
+	}
+
+	private static function password_field( $label, $name, $autocomplete, $attrs = '', $hint = '' ) {
+		return '<label class="uf-field"><span>' . esc_html( $label ) . '</span>'
+			. '<span class="uf-pw-wrap"><input type="password" name="' . esc_attr( $name ) . '" autocomplete="' . esc_attr( $autocomplete ) . '" ' . $attrs . ' required>'
+			. '<button type="button" class="uf-pw-toggle" data-uf-toggle-pw aria-pressed="false" aria-label="' . esc_attr__( 'Show password', 'unfold' ) . '">' . esc_html__( 'Show', 'unfold' ) . '</button></span>'
+			. ( $hint ? '<small>' . esc_html( $hint ) . '</small>' : '' ) . '</label>';
 	}
 
 	private static function otp_form( $email ) {
@@ -440,8 +520,52 @@ class Unfold_Accounts {
 				'<a href="' . esc_url( wp_logout_url( home_url( '/' ) ) ) . '">' . esc_html__( 'Sign out', 'unfold' ) . '</a>'
 			);
 		}
+		$action = sanitize_key( (string) ( $_GET['action'] ?? '' ) ); // phpcs:ignore WordPress.Security.NonceVerification
+		if ( 'forgot' === $action ) {
+			$f_err    = self::flash( 'forgot_error' );
+			$f_notice = self::flash( 'forgot_notice' );
+			$f_body   = ( $f_err ? '<div class="uf-alert uf-alert--error" role="alert">' . esc_html( $f_err ) . '</div>' : '' )
+				. ( $f_notice ? '<div class="uf-alert uf-alert--ok" role="status">' . esc_html( $f_notice ) . '</div>' : '' )
+				. '<form method="post" class="uf-form" novalidate>'
+				. wp_nonce_field( 'unfold_forgot', '_unfold_forgot', true, false )
+				. '<input type="hidden" name="unfold_form" value="forgot">'
+				. '<label class="uf-field"><span>' . esc_html__( 'Email', 'unfold' ) . '</span><input type="text" name="log" autocomplete="username" required value="' . esc_attr( sanitize_text_field( self::post_str( 'log' ) ) ) . '"></label>'
+				. '<button class="uf-btn uf-btn--block" type="submit">' . esc_html__( 'Send reset link', 'unfold' ) . '</button>'
+				. '</form>';
+			return self::card(
+				__( 'Reset your password', 'unfold' ),
+				__( 'Enter your KAU email address and we will send a link to choose a new password.', 'unfold' ),
+				$f_body,
+				'<a href="' . esc_url( Unfold_Portals::url( 'login' ) ) . '">' . esc_html__( 'Back to sign in', 'unfold' ) . '</a>'
+			);
+		}
+		if ( 'reset' === $action ) {
+			$r_key   = sanitize_text_field( (string) ( $_GET['key'] ?? self::post_str( 'key' ) ) ); // phpcs:ignore WordPress.Security.NonceVerification
+			$r_login = sanitize_text_field( (string) ( $_GET['login'] ?? self::post_str( 'login' ) ) ); // phpcs:ignore WordPress.Security.NonceVerification
+			$r_err   = self::flash( 'reset_error' );
+			$r_body  = ( $r_err ? '<div class="uf-alert uf-alert--error" role="alert">' . esc_html( $r_err ) . '</div>' : '' )
+				. '<form method="post" class="uf-form" novalidate>'
+				. wp_nonce_field( 'unfold_reset', '_unfold_reset', true, false )
+				. '<input type="hidden" name="unfold_form" value="reset">'
+				. '<input type="hidden" name="key" value="' . esc_attr( $r_key ) . '">'
+				. '<input type="hidden" name="login" value="' . esc_attr( $r_login ) . '">'
+				. self::password_field( __( 'New password', 'unfold' ), 'new_pass', 'new-password', 'minlength="8"', __( 'At least 8 characters.', 'unfold' ) )
+				. self::password_field( __( 'Confirm password', 'unfold' ), 'confirm_pass', 'new-password', 'minlength="8"' )
+				. '<button class="uf-btn uf-btn--block" type="submit">' . esc_html__( 'Update password', 'unfold' ) . '</button>'
+				. '</form>';
+			return self::card(
+				__( 'Choose a new password', 'unfold' ),
+				'',
+				$r_body,
+				'<a href="' . esc_url( Unfold_Portals::url( 'login' ) ) . '">' . esc_html__( 'Back to sign in', 'unfold' ) . '</a>'
+			);
+		}
+
 		$err         = self::flash( 'login_error' );
 		$notice      = self::flash( 'login_notice' );
+		if ( ! $notice && ! empty( $_GET['reset'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification
+			$notice = __( 'Your password has been updated. You can sign in now.', 'unfold' );
+		}
 		$resend      = self::flash( 'resend_for' );
 		$verify_err  = self::flash( 'verify_error' );
 		$verify_mail = self::flash( 'verify_email' ) ?: $resend;
@@ -460,11 +584,11 @@ class Unfold_Accounts {
 			. wp_nonce_field( 'unfold_login', '_unfold_login', true, false )
 			. '<input type="hidden" name="unfold_form" value="login">'
 			. '<label class="uf-field"><span>' . esc_html__( 'Email', 'unfold' ) . '</span><input type="text" name="log" autocomplete="username" required value="' . esc_attr( sanitize_text_field( self::post_str( 'log' ) ) ) . '"></label>'
-			. '<label class="uf-field"><span>' . esc_html__( 'Password', 'unfold' ) . '</span><input type="password" name="pwd" autocomplete="current-password" required></label>'
+			. self::password_field( __( 'Password', 'unfold' ), 'pwd', 'current-password' )
 			. '<label class="uf-check"><input type="checkbox" name="rememberme" value="1"> ' . esc_html__( 'Keep me signed in', 'unfold' ) . '</label>'
 			. '<button class="uf-btn uf-btn--block" type="submit">' . esc_html__( 'Sign in', 'unfold' ) . '</button>'
 			. '</form>';
-		$foot = esc_html__( 'New here?', 'unfold' ) . ' <a href="' . esc_url( Unfold_Portals::url( 'register' ) ) . '">' . esc_html__( 'Create an account', 'unfold' ) . '</a> · <a href="' . esc_url( wp_lostpassword_url() ) . '">' . esc_html__( 'Forgot password?', 'unfold' ) . '</a>'
+		$foot = esc_html__( 'New here?', 'unfold' ) . ' <a href="' . esc_url( Unfold_Portals::url( 'register' ) ) . '">' . esc_html__( 'Create an account', 'unfold' ) . '</a> · <a href="' . esc_url( Unfold_Portals::url( 'login', array( 'action' => 'forgot' ) ) ) . '">' . esc_html__( 'Forgot password?', 'unfold' ) . '</a>'
 			. '<br><span class="uf-muted">' . esc_html__( 'Instructors: use the account and password set up from the email the site administrator sent you.', 'unfold' ) . '</span>';
 		return self::card( __( 'Sign in', 'unfold' ), '', $body, $foot );
 	}
@@ -507,7 +631,7 @@ class Unfold_Accounts {
 			. '<label class="uf-field"><span>' . esc_html__( 'Full name', 'unfold' ) . '</span><input type="text" name="uf_name" autocomplete="name" required value="' . esc_attr( $v['name'] ?? '' ) . '"></label>'
 			. '<label class="uf-field"><span>' . esc_html__( 'Email', 'unfold' ) . '</span><input type="email" name="uf_email" autocomplete="email" required value="' . esc_attr( $v['email'] ?? '' ) . '">'
 			. ( $domains ? '<small>' . esc_html( sprintf( __( 'Must end with @%s', 'unfold' ), implode( ' or @', $domains ) ) ) . '</small>' : '' ) . '</label>'
-			. '<label class="uf-field"><span>' . esc_html__( 'Password', 'unfold' ) . '</span><input type="password" name="uf_password" autocomplete="new-password" minlength="8" required><small>' . esc_html__( 'At least 8 characters.', 'unfold' ) . '</small></label>'
+			. self::password_field( __( 'Password', 'unfold' ), 'uf_password', 'new-password', 'minlength="8"', __( 'At least 8 characters.', 'unfold' ) )
 			. '<label class="uf-hp" aria-hidden="true">Website <input type="text" name="uf_website" tabindex="-1" autocomplete="off"></label>'
 			. '<button class="uf-btn uf-btn--block" type="submit">' . esc_html__( 'Create account', 'unfold' ) . '</button>'
 			. '</form>';

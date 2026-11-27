@@ -40,4 +40,10 @@ final class AccountsTest extends TestCase {
 		$this->assertSame( 'tls', $cfg['secure'] );
 		$this->assertSame( 'unfold@kau.edu.sa', $cfg['from'] );
 	}
+
+	public function test_smtp_config_reports_unconfigured_when_empty(): void {
+		$cfg = Unfold_Accounts::smtp_config();
+		$this->assertFalse( $cfg['configured'] );
+		$this->assertSame( '', $cfg['host'] );
+	}
 }
