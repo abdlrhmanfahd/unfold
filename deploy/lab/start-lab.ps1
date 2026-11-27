@@ -18,15 +18,23 @@ if (-not $SiteUrl) { $SiteUrl = 'http://localhost:8881' }
 $env:UNFOLD_SITE = $SiteUrl
 if ($Provider) { $env:UNFOLD_AI_PROVIDER = $Provider }
 
-function Find-Python([string]$PreferredVenv) {
-    if (Test-Path $PreferredVenv) { return $PreferredVenv }
+function Find-Python([string[]]$Candidates) {
+    foreach ($p in $Candidates) {
+        if ($p -and (Test-Path $p)) { return $p }
+    }
     $cmd = Get-Command python -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
-    throw "Python executable not found (checked $PreferredVenv and PATH)."
+    throw "Python executable not found (checked $($Candidates -join ', ') and PATH)."
 }
 
-$WorldPy   = Find-Python "$env:LOCALAPPDATA\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\unfold-session-export\venv\Scripts\python.exe"
-$ExtractPy = Find-Python "$env:LOCALAPPDATA\unfold-extractor\venv\Scripts\python.exe"
+$WorldPy = Find-Python @(
+    (Join-Path $RepoRoot 'workers\world\.venv\Scripts\python.exe'),
+    "$env:LOCALAPPDATA\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\unfold-session-export\venv\Scripts\python.exe"
+)
+$ExtractPy = Find-Python @(
+    (Join-Path $RepoRoot 'workers\extractor\.venv\Scripts\python.exe'),
+    "$env:LOCALAPPDATA\unfold-extractor\venv\Scripts\python.exe"
+)
 
 $WorldScript   = Join-Path $RepoRoot 'workers\world\world_worker.py'
 $ExtractScript = Join-Path $RepoRoot 'workers\extractor\unfold_worker.py'
