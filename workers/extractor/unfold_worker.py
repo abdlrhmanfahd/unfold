@@ -385,13 +385,13 @@ def _tracked_null() -> dict:
 _HELPER_CODE_RE = re.compile(r"(?:^|/)(?:make_|setup\.py$|__init__\.py$|.*submission.*\.py$)", re.I)
 
 _SUBSYSTEM_RULES: list[tuple[str, str, str, str, list[str], tuple[str, ...]]] = [
-    ("perception", "Perception & Sensing", "Reads environment sensors and detects obstacles.", "perception", ["lidar"], ("lidar", "scan", "cam", "vision", "detect", "percept", "sensor")),
-    ("localization", "Localization & Mapping", "Estimates vehicle pose and map state.", "localization", ["imu"], ("localiz", "slam", "odom", "ekf", "kalman", "pose", "imu", "map")),
-    ("planning", "Path Planning & Logic", "Computes trajectories and driving decisions.", "planning", ["compute"], ("plan", "route", "logic", "path", "nav", "decision", "patch", "avoid", "traj")),
-    ("control", "Control & Execution", "Drives speed, steering, and simulation execution.", "control", ["compute", "motor"], ("run", "ctrl", "control", "pid", "mpc", "steer", "speed", "motor", "sim", "common", "drive")),
-    ("fleet_coordination", "Fleet Coordination", "Coordinates tasks and multi-vehicle state.", "fleet_coordination", ["wifi"], ("fleet", "coord", "multi", "dispatch", "alloc", "sched", "actor")),
-    ("communication", "Communication & Middleware", "Exchanges messages across nodes.", "communication", ["wifi"], ("comm", "msg", "socket", "net", "bridge", "ros")),
-    ("evaluation_analysis", "Data Logging & Evaluation", "Evaluates metrics and logs experiment runs.", "other", ["compute"], ("analys", "score", "study", "summar", "eval", "metric", "io", "log")),
+    ("perception", "Perception & sensing", "Reads environment sensors and detects obstacles.", "perception", ["lidar"], ("lidar", "scan", "cam", "vision", "detect", "percept", "sensor")),
+    ("localization", "State localization", "Estimates vehicle pose and map state.", "localization", ["imu"], ("localiz", "slam", "odom", "ekf", "kalman", "pose", "imu", "map")),
+    ("planning", "Path planning", "Computes trajectories and driving decisions.", "planning", ["compute"], ("plan", "route", "logic", "path", "nav", "decision", "patch", "avoid", "traj")),
+    ("control", "Vehicle control", "Drives speed, steering, and simulation execution.", "control", ["compute", "motor"], ("run", "ctrl", "control", "pid", "mpc", "steer", "speed", "motor", "sim", "common", "drive")),
+    ("fleet_coordination", "Fleet coordination", "Coordinates tasks and multi-vehicle state.", "fleet_coordination", ["wifi"], ("fleet", "coord", "multi", "dispatch", "alloc", "sched", "actor")),
+    ("communication", "Communication", "Exchanges messages across nodes.", "communication", ["wifi"], ("comm", "msg", "socket", "net", "bridge", "ros")),
+    ("evaluation_analysis", "Data evaluation", "Evaluates metrics and logs experiment runs.", "other", ["compute"], ("analys", "score", "study", "summar", "eval", "metric", "io", "log")),
 ]
 
 
@@ -446,11 +446,11 @@ def _pick_title(pages: list[tuple[int, str]], report: str | None) -> str:
     if len(fallback) < 2:
         fallback = "Engineering Project"
     if pages:
-        for ln in pages[0][1].splitlines()[:14]:
+        for ln in pages[0][1].splitlines()[:16]:
             s = re.sub(r"\s+", " ", ln).strip()
-            if len(s) < 6 or len(s) > 110:
+            if len(s) < 6 or len(s) > 110 or "|" in s:
                 continue
-            if re.match(r"^(?:page\s+\d+|table of contents|\d+[./-]\d+|figure\s+\d+|table\s+\d+|contents$)", s, re.I):
+            if re.match(r"^(?:page\s+\d+|table of contents|\d+[./-]\d+|figure\s+\d+|table\s+\d+|contents$|team and problem|member\s+\d|king abdulaziz)", s, re.I):
                 continue
             if _is_clean_text_chunk(s) and len(re.findall(r"[A-Za-z]{3,}", s)) >= 2:
                 return s
@@ -495,14 +495,16 @@ def _split_sections(pages: list[tuple[int, str]]) -> dict[str, tuple[str, int]]:
 
 def _first_clean_paragraph(pages: list[tuple[int, str]], max_chars: int = 420) -> str | None:
     paras: list[str] = []
-    for _, body in pages[:3]:
+    for _, body in pages[:4]:
         for line in body.splitlines():
             s = re.sub(r"\s+", " ", line).strip()
-            if len(s) >= 28 and _is_clean_text_chunk(s) and not re.match(r"^(?:page\s+\d+|figure\s+\d+|table\s+\d+|\d+\s*$)", s, re.I):
+            if "|" in s or re.match(r"^(?:page\s+\d+|figure\s+\d+|table\s+\d+|\d+\s*$|team and problem|member\s+\d|king abdulaziz)", s, re.I):
+                continue
+            if len(s) >= 35 and _is_clean_text_chunk(s) and (s.endswith((".", "?", "!")) or len(s.split()) >= 7):
                 paras.append(s)
             if sum(len(x) for x in paras) >= max_chars:
                 break
-        if paras:
+        if len(paras) >= 2:
             break
     joined = re.sub(r"\s+", " ", " ".join(paras)).strip()
     if len(joined) > max_chars:
