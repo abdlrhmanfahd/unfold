@@ -34,7 +34,7 @@
 .uf-p2-details{margin-top:2rem;padding-top:1rem;border-top:1px solid var(--line)}
 
 /* The car, full screen */
-.ufp-car{position:fixed;inset:0;z-index:90;background:#EEF2F5}
+.ufp-car{position:fixed;inset:0;z-index:100001;background:#EEF2F5}
 .ufp-car[hidden]{display:none!important}
 .ufp-stage{position:absolute;inset:0}
 .ufp-top{position:absolute;z-index:4;left:max(16px,env(safe-area-inset-left,0px));right:max(16px,env(safe-area-inset-right,0px));top:max(16px,env(safe-area-inset-top,0px));display:flex;align-items:flex-start;gap:1rem;pointer-events:none}
@@ -52,7 +52,7 @@
 
 /* Break-it sheet */
 html.ufp-locked{overflow:hidden}
-.ufp-sheet{position:fixed;inset:0;z-index:110;background:rgba(15,23,32,.38);display:flex;align-items:flex-end;justify-content:center}
+.ufp-sheet{position:fixed;inset:0;z-index:100010;background:rgba(15,23,32,.38);display:flex;align-items:flex-end;justify-content:center}
 .ufp-sheet[hidden]{display:none!important}
 .ufp-sheet-in{background:#fff;width:min(1180px,100%);max-height:calc(100% - 24px);overflow-y:auto;border-radius:16px 16px 0 0;
   padding:1.1rem max(16px,env(safe-area-inset-right,0px)) max(1.25rem,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));box-shadow:0 -10px 40px rgba(15,23,32,.2)}
@@ -111,7 +111,7 @@ html.ufp-locked{overflow:hidden}
 .uf-p2-inner{position:relative}
 .uf-p2-details.is-folded .uf-p2-inner{max-height:0;overflow:hidden;visibility:hidden}
 .uf-p2-inner{margin-top:1rem}
-.ufp-lightbox{position:fixed;inset:0;z-index:120;background:rgba(15,23,32,.72);display:flex;align-items:center;justify-content:center;padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.ufp-lightbox{position:fixed;inset:0;z-index:100020;background:rgba(15,23,32,.72);display:flex;align-items:center;justify-content:center;padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
 .ufp-lightbox[hidden]{display:none!important}
 .ufp-lb-in{background:#fff;border-radius:16px;width:min(1100px,100%);max-height:100%;overflow:auto;padding:1rem 1.25rem;display:flex;flex-direction:column;gap:.75rem}
 .ufp-lb-head{display:flex;justify-content:space-between;align-items:center;gap:1rem}

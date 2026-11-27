@@ -19,7 +19,7 @@
 	font: inherit; font-size: 1rem; color: var(--uf-ink); background: #fff; border: 1px solid #d1d5db; border-radius: 10px; padding: 10px 12px; min-height: 44px; width: 100%;
 }
 .uf-field textarea, .uff-field textarea { min-height: 80px; resize: vertical; line-height: 1.5; }
-.uf-field input:focus, .uf-field select:focus, .uf-field textarea:focus, .uff-field :is(input, select, textarea):focus, .uff-tracked input:focus { outline: none; border-color: var(--uf-accent); box-shadow: 0 0 0 3px rgba(43, 89, 255, .18); }
+.uf-field input:focus, .uf-field select:focus, .uf-field textarea:focus, .uff-field :is(input, select, textarea):focus, .uff-tracked input:focus { outline: none; border-color: var(--uf-accent); box-shadow: 0 0 0 3px rgba(11, 138, 122, .22); }
 .uf-field--inline { grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--uf-s3); max-width: 640px; }
 .uf-field-row { display: grid; gap: var(--uf-s3); grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 .uf-check { display: flex; align-items: center; gap: 8px; font-size: .95rem; cursor: pointer; }

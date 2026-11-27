@@ -537,9 +537,12 @@ class Unfold_Render {
 		foreach ( $d['results']['metrics'] as $m ) {
 			$k = $norm( $m['metric'] );
 			if ( ! isset( $rows[ $k ] ) ) {
-				$rows[ $k ] = array( 'metric' => $m['metric'], 'target' => null, 'result' => null );
+				$rows[ $k ] = array( 'metric' => $m['metric'], 'target' => null, 'result' => $m );
+			} elseif ( null === $rows[ $k ]['result'] ) {
+				$rows[ $k ]['result'] = $m;
+			} else {
+				$rows[] = array( 'metric' => $m['metric'], 'target' => $rows[ $k ]['target'], 'result' => $m );
 			}
-			$rows[ $k ]['result'] = $m;
 		}
 		return $rows;
 	}
@@ -764,6 +767,9 @@ class Unfold_Render {
 			__( 'Obstacles', 'unfold' )    => self::text( self::label( 'obstacles', $e['obstacles'] ), __( 'Obstacles', 'unfold' ) ),
 			__( 'Other agents', 'unfold' ) => self::text( $e['other_agents'], __( 'Other agents', 'unfold' ) ),
 		);
+		if ( self::has_text( $e['map_file'] ?? null ) ) {
+			$facts[ __( 'Map file', 'unfold' ) ] = '<code>' . esc_html( $e['map_file'] ) . '</code>';
+		}
 		$body .= '<dl class="uf-dl">';
 		foreach ( $facts as $k => $v ) {
 			$body .= '<div><dt>' . esc_html( $k ) . '</dt><dd>' . $v . '</dd></div>';
