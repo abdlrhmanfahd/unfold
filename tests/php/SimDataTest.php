@@ -54,4 +54,18 @@ final class SimDataTest extends TestCase {
 		$this->assertArrayHasKey( 'error', $missing );
 		$this->assertStringContainsString( 'nonexistent', $missing['error'] );
 	}
+
+	public function test_columns_strips_utf8_bom_and_handles_empty_wanted(): void {
+		$method = new ReflectionMethod( Unfold_SimData::class, 'columns' );
+
+		$bomCsv = "\xEF\xBB\xBFt,speed\n0.0,1.25\n0.5,2.5\n";
+		$parsed = $method->invoke( null, $bomCsv, array( 't', 'speed' ) );
+
+		$this->assertArrayHasKey( 'cols', $parsed );
+		$this->assertSame( array( 0.0, 0.5 ), $parsed['cols']['t'] );
+		$this->assertSame( array( 1.25, 2.5 ), $parsed['cols']['speed'] );
+
+		$empty = $method->invoke( null, $bomCsv, array() );
+		$this->assertSame( array( 'cols' => array() ), $empty );
+	}
 }

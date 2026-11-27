@@ -32,7 +32,9 @@ class Unfold_SimData {
 		if ( ! $parts ) {
 			return array();
 		}
-		$hash  = md5( wp_json_encode( wp_list_pluck( $parts, 'sim' ) ) . filemtime( __FILE__ ) );
+		$zip_path  = Unfold_Workflow::zip_path( $post_id );
+		$zip_mtime = ( $zip_path && is_file( $zip_path ) ) ? (string) filemtime( $zip_path ) : '';
+		$hash      = md5( wp_json_encode( wp_list_pluck( $parts, 'sim' ) ) . filemtime( __FILE__ ) . $zip_mtime );
 		$cache = get_post_meta( $post_id, '_unfold_simdata', true );
 		if ( is_array( $cache ) && ( $cache['hash'] ?? '' ) === $hash ) {
 			return $cache['data'];
@@ -115,8 +117,13 @@ class Unfold_SimData {
 
 	/** Picks columns from CSV text. Rows with t < 0 are dropped when the first column is time. */
 	private static function columns( $csv, $wanted ) {
+		if ( empty( $wanted ) ) {
+			return array( 'cols' => array() );
+		}
+		$csv   = preg_replace( '/^\xEF\xBB\xBF/', '', (string) $csv );
 		$lines = preg_split( '/\r\n|\n|\r/', trim( $csv ) );
-		$head  = str_getcsv( array_shift( $lines ) );
+		$first = array_shift( $lines );
+		$head  = null !== $first && '' !== $first ? str_getcsv( $first, ',', '"', '' ) : array();
 		$idx   = array();
 		foreach ( $wanted as $c ) {
 			$i = array_search( $c, $head, true );
@@ -131,7 +138,7 @@ class Unfold_SimData {
 			if ( '' === $line ) {
 				continue;
 			}
-			$r   = str_getcsv( $line );
+			$r   = str_getcsv( $line, ',', '"', '' );
 			$row = array();
 			foreach ( $idx as $c => $i ) {
 				$v       = $r[ $i ] ?? '';
