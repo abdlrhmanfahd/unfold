@@ -235,8 +235,12 @@ class Unfold_Render {
 		return count( Unfold_SimData::template_parts( $data ) );
 	}
 
-	/** First image in results.media that was uploaded: used as the gallery card image. */
+	/** Featured AI cover image if generated, otherwise first uploaded image in results.media. */
 	public static function cover_image( $post_id, $data ) {
+		$thumb_id = (int) get_post_thumbnail_id( $post_id );
+		if ( $thumb_id ) {
+			return $thumb_id;
+		}
 		$atts = self::attachments( $post_id );
 		foreach ( $data['results']['media'] ?? array() as $m ) {
 			if ( isset( $atts[ wp_basename( $m['file'] ) ] ) && 0 === strpos( $atts[ wp_basename( $m['file'] ) ]->post_mime_type, 'image/' ) ) {

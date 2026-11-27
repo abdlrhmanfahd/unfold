@@ -33,6 +33,7 @@ import time
 import zipfile
 import zlib
 from pathlib import PurePosixPath
+from urllib.parse import quote
 
 import requests
 
@@ -1262,6 +1263,82 @@ class Site:
         return r.json()
 
 
+COVER_PROMPT_TEMPLATE = (
+    "2D vector illustration of {description}, clean thin grey outlines, soft gradient shading, "
+    "subtle white highlights, semi-flat volume effect. Vibrant colors, professional cartoonish clip-art style, "
+    "isolated on a pure white background."
+)
+
+
+def build_cover_prompt(data: dict) -> str:
+    """Format the 2D vector cover illustration prompt from extracted project title/description."""
+    meta = data.get("meta") or {}
+    title = str(meta.get("title") or "").strip()
+    desc = str(meta.get("short_description") or "").strip()
+    if title and desc and desc.lower() != title.lower():
+        raw = f"{title} - {desc}"
+    else:
+        raw = title or desc or "engineering autonomous robotics project"
+    raw = re.sub(r"\s+", " ", raw).strip()[:240].rstrip(" ,;:-")
+    return COVER_PROMPT_TEMPLATE.format(description=raw)
+
+
+def generate_cover_image(client: LLMClient, data: dict) -> tuple[bytes, str, str] | None:
+    """Generate a 2D vector illustration for the project card using configured AI or free fallback."""
+    prompt = build_cover_prompt(data)
+
+    if client.provider == "gemini":
+        key = client.api_key or os.environ.get("GEMINI_API_KEY") or read_secret_file("gemini-key.txt")
+        if key:
+            try:
+                url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent"
+                r = requests.post(
+                    url,
+                    params={"key": key},
+                    json={
+                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                        "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
+                    },
+                    timeout=60,
+                )
+                if r.ok:
+                    for pt in (((r.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or []):
+                        inl = pt.get("inlineData") or {}
+                        if inl.get("data"):
+                            return base64.standard_b64decode(inl["data"]), inl.get("mimeType") or "image/png", prompt
+            except Exception:  # noqa: BLE001
+                log.debug("gemini image generation unavailable, trying fallback", exc_info=True)
+
+    if client.provider == "openai_compat" and client.base_url and "api.openai.com" in client.base_url.lower():
+        key = client.api_key or os.environ.get("UNFOLD_AI_API_KEY") or read_secret_file("ai-key.txt")
+        if key:
+            try:
+                r = requests.post(
+                    f"{client.base_url.rstrip('/')}/images/generations",
+                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                    json={"model": "gpt-image-1", "prompt": prompt, "size": "1024x1024", "response_format": "b64_json"},
+                    timeout=60,
+                )
+                if r.ok:
+                    b64 = ((r.json().get("data") or [{}])[0]).get("b64_json")
+                    if b64:
+                        return base64.standard_b64decode(b64), "image/png", prompt
+            except Exception:  # noqa: BLE001
+                log.debug("openai image generation unavailable, trying fallback", exc_info=True)
+
+    if os.environ.get("UNFOLD_IMAGE_FALLBACK", "1") != "0":
+        try:
+            url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=640&nologo=true"
+            r = requests.get(url, timeout=45)
+            ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if r.ok and ct.startswith("image/") and len(r.content) > 1024:
+                return r.content, ct, prompt
+        except Exception:  # noqa: BLE001
+            log.debug("pollinations cover fallback failed", exc_info=True)
+
+    return None
+
+
 def handle(site: Site, client: LLMClient, job: dict) -> None:
     active_client = client
     job_ai = job.get("ai")
@@ -1290,6 +1367,23 @@ def handle(site: Site, client: LLMClient, job: dict) -> None:
             r.raise_for_status()
     except Exception:  # noqa: BLE001
         log.exception("brief check failed (the project is not affected)")
+    try:
+        cover = generate_cover_image(active_client, data)
+        if cover:
+            img_bytes, mime_type, cover_prompt = cover
+            r = site.s.post(
+                site.route(f"/worker/projects/{job['project_id']}/cover-image"),
+                json={
+                    "image_base64": base64.standard_b64encode(img_bytes).decode("ascii"),
+                    "mime_type": mime_type,
+                    "prompt": cover_prompt,
+                },
+                timeout=60,
+            )
+            r.raise_for_status()
+            log.info("uploaded AI cover illustration for project %s", job["project_id"])
+    except Exception:  # noqa: BLE001
+        log.exception("cover illustration failed (the project is not affected)")
 
 
 def default_schema_path() -> str:

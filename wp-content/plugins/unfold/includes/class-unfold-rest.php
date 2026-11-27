@@ -53,6 +53,7 @@ class Unfold_Rest {
 		register_rest_route( self::NS, '/worker/jobs/(?P<id>\d+)/zip', array( 'methods' => 'GET', 'callback' => array( __CLASS__, 'worker_zip' ), 'permission_callback' => $worker ) );
 		register_rest_route( self::NS, '/worker/jobs/(?P<id>\d+)/result', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'worker_result' ), 'permission_callback' => $worker ) );
 		register_rest_route( self::NS, '/worker/projects/(?P<id>\d+)/brief-score', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'worker_brief_score' ), 'permission_callback' => $worker ) );
+		register_rest_route( self::NS, '/worker/projects/(?P<id>\d+)/cover-image', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'worker_cover_image' ), 'permission_callback' => $worker ) );
 	}
 
 	/* ---------------------------------------------------------------------
@@ -360,5 +361,52 @@ class Unfold_Rest {
 		}
 		$res = Unfold_Workflow::complete_job( $id, $body['data'], (array) ( $body['meta'] ?? array() ) );
 		return array( 'ok' => true, 'schema_errors' => $res['errors'], 'attached' => $res['attached'] );
+	}
+
+	/** Store an AI-generated project cover illustration and set it as the featured image. */
+	public static function worker_cover_image( WP_REST_Request $r ) {
+		$id = (int) $r['id'];
+		if ( Unfold_Post_Type::TYPE !== get_post_type( $id ) ) {
+			return new WP_Error( 'unfold_project', 'No such project.', array( 'status' => 404 ) );
+		}
+		$b     = $r->get_json_params();
+		$bytes = base64_decode( (string) ( $b['image_base64'] ?? '' ), true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
+		if ( false === $bytes || '' === $bytes || strlen( $bytes ) > 10 * 1024 * 1024 ) {
+			return new WP_Error( 'unfold_image', 'Invalid or oversized image payload.', array( 'status' => 400 ) );
+		}
+		$info = function_exists( 'getimagesizefromstring' ) ? @getimagesizefromstring( $bytes ) : false; // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		$mime = is_array( $info ) ? (string) ( $info['mime'] ?? '' ) : '';
+		$map  = array( 'image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp' );
+		if ( ! isset( $map[ $mime ] ) ) {
+			return new WP_Error( 'unfold_image_type', 'Unsupported cover image type.', array( 'status' => 400 ) );
+		}
+		$ext = $map[ $mime ];
+		$tmp = Unfold_Workflow::project_dir( $id ) . '/ai-cover-' . wp_generate_password( 8, false, false ) . '.' . $ext;
+		if ( false === file_put_contents( $tmp, $bytes ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions
+			return new WP_Error( 'unfold_image_write', 'Could not write temporary image.', array( 'status' => 500 ) );
+		}
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		require_once ABSPATH . 'wp-admin/includes/media.php';
+		require_once ABSPATH . 'wp-admin/includes/image.php';
+		$att_id = media_handle_sideload(
+			array(
+				'name'     => 'ai-cover-' . $id . '.' . $ext,
+				'tmp_name' => $tmp,
+			),
+			$id
+		);
+		if ( is_wp_error( $att_id ) ) {
+			if ( is_file( $tmp ) ) {
+				wp_delete_file( $tmp );
+			}
+			return $att_id;
+		}
+		set_post_thumbnail( $id, $att_id );
+		$prompt = mb_substr( sanitize_text_field( (string) ( $b['prompt'] ?? '' ) ), 0, 500 );
+		if ( '' !== $prompt ) {
+			update_post_meta( $id, '_unfold_cover_prompt', $prompt );
+		}
+		Unfold_Workflow::log( $id, 'cover_generated', (string) $att_id );
+		return array( 'ok' => true, 'attachment_id' => $att_id );
 	}
 }
