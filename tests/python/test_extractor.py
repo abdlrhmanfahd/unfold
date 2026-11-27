@@ -142,19 +142,21 @@ class ExtractorWorkerTests(unittest.TestCase):
     def test_ollama_client_parses_response(self):
         fake_resp = mock.Mock()
         fake_resp.status_code = 200
-        fake_resp.json.return_value = {
-            "message": {"content": '{"schema_version": "0.2", "local": true}'},
-            "prompt_eval_count": 80,
-            "eval_count": 20,
-        }
+        fake_resp.iter_lines.return_value = [
+            json.dumps({"message": {"content": '{"schema_version": "0.2", '}, "done": False}),
+            json.dumps({"message": {"content": '"local": true}'}, "done": True, "prompt_eval_count": 80, "eval_count": 20}),
+        ]
         with mock.patch.dict(os.environ, {"UNFOLD_AI_PROVIDER": "ollama"}):
             with mock.patch.object(uw.requests, "post", return_value=fake_resp) as post:
                 client = uw.LLMClient("ollama")
                 res, meta = client.ask_json("sys", [{"type": "text", "text": "hello"}])
                 self.assertTrue(res["local"])
                 self.assertEqual(meta["usage"]["output_tokens"], 20)
+                self.assertTrue(post.call_args.kwargs["stream"])
+                self.assertTrue(post.call_args.kwargs["json"]["stream"])
                 opts = post.call_args.kwargs["json"]["options"]
                 self.assertGreaterEqual(opts["num_ctx"], 8192)
+                self.assertGreaterEqual(opts["num_predict"], 2048)
                 self.assertEqual(opts["temperature"], 0.1)
 
     def test_merge_with_skeleton_strips_unknown_root_and_fills_required_sections(self):
@@ -354,11 +356,9 @@ class ExtractorWorkerTests(unittest.TestCase):
         context_part = "Inventory and stats:\n" + ("C" * 500) + "\nEND_CONTEXT_MARKER"
         fake_resp = mock.Mock()
         fake_resp.status_code = 200
-        fake_resp.json.return_value = {
-            "message": {"content": '{"schema_version": "0.2"}'},
-            "prompt_eval_count": 100,
-            "eval_count": 10,
-        }
+        fake_resp.iter_lines.return_value = [
+            json.dumps({"message": {"content": '{"schema_version": "0.2"}'}, "done": True, "prompt_eval_count": 100, "eval_count": 10}),
+        ]
         with mock.patch.object(uw.requests, "post", return_value=fake_resp) as post:
             client = uw.LLMClient("ollama")
             client.ask_json("sys", [{"type": "text", "text": long_report}, {"type": "text", "text": context_part}])

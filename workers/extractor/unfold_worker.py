@@ -1097,16 +1097,16 @@ class LLMClient:
         text_chunks = []
         for p in parts:
             if p["type"] == "pdf":
-                text_chunks.append(f'<report name="{p["title"]}">\n{pdf_text(p["bytes"], max_chars=8_000)}\n</report>')
+                text_chunks.append(f'<report name="{p["title"]}">\n{pdf_text(p["bytes"], max_chars=5_500)}\n</report>')
             else:
-                cap = 8_000 if p["text"].lstrip().startswith("<report ") else 10_000
-                text_chunks.append(p["text"][:cap])
-        user_text = "\n\n".join(text_chunks)[:18_000]
+                text_chunks.append(p["text"][:5_500])
+        user_text = "\n\n".join(text_chunks)[:11_500]
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user_text},
         ]
         num_ctx = int(os.environ.get("UNFOLD_OLLAMA_NUM_CTX", "8192"))
+        num_predict = int(os.environ.get("UNFOLD_OLLAMA_NUM_PREDICT", "2048"))
         for attempt in (1, 2):
             r = requests.post(
                 f"{base}/api/chat",
@@ -1114,18 +1114,31 @@ class LLMClient:
                     "model": self.model,
                     "messages": messages,
                     "format": "json",
-                    "stream": False,
-                    "options": {"num_ctx": num_ctx, "temperature": 0.1},
+                    "stream": True,
+                    "options": {"num_ctx": num_ctx, "num_predict": num_predict, "temperature": 0.1},
                 },
-                timeout=600,
+                stream=True,
+                timeout=(15, 300),
             )
             r.raise_for_status()
-            body = r.json()
-            text = (body.get("message") or {}).get("content") or ""
+            chunks: list[str] = []
+            prompt_tokens = 0
+            eval_tokens = 0
+            for raw_line in r.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                chunk = json.loads(raw_line)
+                piece = (chunk.get("message") or {}).get("content") or ""
+                if piece:
+                    chunks.append(piece)
+                if chunk.get("done"):
+                    prompt_tokens = int(chunk.get("prompt_eval_count") or 0)
+                    eval_tokens = int(chunk.get("eval_count") or 0)
+            text = "".join(chunks)
             try:
                 usage = {
-                    "input_tokens": int(body.get("prompt_eval_count") or 0),
-                    "output_tokens": int(body.get("eval_count") or 0),
+                    "input_tokens": prompt_tokens,
+                    "output_tokens": eval_tokens,
                     "cache_read_input_tokens": 0,
                 }
                 return parse_json(text), {"model": self.model, "usage": usage}
