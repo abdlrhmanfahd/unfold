@@ -78,7 +78,8 @@ class Unfold_CLI {
 			foreach ( $errors as $e ) {
 				WP_CLI::log( ' - ' . $e );
 			}
-			WP_CLI::error( "Saved as draft text on project $post_id, but not published: " . count( $errors ) . ' problem(s).' );
+			$state_label = 'publish' === get_post_status( $post_id ) ? 'public data was not updated' : 'not published';
+			WP_CLI::error( "Saved raw text on project $post_id ($state_label): " . count( $errors ) . ' problem(s).' );
 		}
 		WP_CLI::success( "Project $post_id saved: " . get_permalink( $post_id ) );
 	}

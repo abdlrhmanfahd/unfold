@@ -68,4 +68,27 @@ final class SimDataTest extends TestCase {
 		$empty = $method->invoke( null, $bomCsv, array() );
 		$this->assertSame( array( 'cols' => array() ), $empty );
 	}
+
+	public function test_read_streams_from_zip_and_handles_missing_entries(): void {
+		$tmp = tempnam( sys_get_temp_dir(), 'ufzip' );
+		$this->assertIsString( $tmp );
+
+		$zip = new ZipArchive();
+		$this->assertTrue( $zip->open( $tmp, ZipArchive::OVERWRITE ) === true );
+		$zip->addFromString( 'logs/run.csv', "t,speed\n0,0.5\n" );
+		$zip->close();
+
+		$read = new ReflectionMethod( Unfold_SimData::class, 'read' );
+		$reader = new ZipArchive();
+		$this->assertTrue( $reader->open( $tmp, ZipArchive::RDONLY ) === true );
+
+		try {
+			$this->assertSame( "t,speed\n0,0.5\n", $read->invoke( null, $reader, 'logs/run.csv' ) );
+			$this->assertSame( "t,speed\n0,0.5\n", $read->invoke( null, $reader, 'run.csv' ) );
+			$this->assertNull( $read->invoke( null, $reader, 'missing.csv' ) );
+		} finally {
+			$reader->close();
+			@unlink( $tmp );
+		}
+	}
 }

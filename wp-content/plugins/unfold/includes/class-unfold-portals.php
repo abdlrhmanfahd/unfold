@@ -61,11 +61,13 @@ class Unfold_Portals {
 		}
 		$dirty = false;
 		foreach ( self::PAGES as $key => $p ) {
-			if ( ! empty( $pages[ $key ] ) && get_post( $pages[ $key ] ) ) {
+			$existing_id = ! empty( $pages[ $key ] ) ? (int) $pages[ $key ] : 0;
+			$existing    = $existing_id ? get_post( $existing_id ) : null;
+			if ( $existing && 'trash' !== $existing->post_status ) {
 				continue;
 			}
-			$existing = get_page_by_path( $p['slug'] );
-			$id       = $existing ? $existing->ID : wp_insert_post(
+			$by_slug = get_page_by_path( $p['slug'] );
+			$id      = ( $by_slug && 'trash' !== $by_slug->post_status ) ? $by_slug->ID : wp_insert_post(
 				array(
 					'post_type'    => 'page',
 					'post_status'  => 'publish',
@@ -201,7 +203,7 @@ class Unfold_Portals {
 		$body = '<section class="uf-upload" id="uf-upload" aria-labelledby="uf-upload-h">'
 			. '<h2 id="uf-upload-h" class="uf-h2">' . esc_html__( 'Upload a project', 'unfold' ) . '</h2>'
 			. '<p class="uf-muted">' . esc_html__( 'Put the report (PDF or Word), code, data logs (CSV), figures and videos into one ZIP file. Unfold reads the report, breaks the project into parts and fills in a form for you to check.', 'unfold' ) . '</p>'
-			. '<label class="uf-drop" data-uf-drop><input type="file" accept=".zip,application/zip" hidden>'
+			. '<label class="uf-drop" data-uf-drop><input type="file" accept=".zip,application/zip" class="screen-reader-text">'
 			. '<span class="uf-drop-icon" aria-hidden="true">⤒</span><strong>' . esc_html__( 'Drop the project ZIP here', 'unfold' ) . '</strong><span>' . esc_html__( 'or click to choose a file · up to 1 GB', 'unfold' ) . '</span></label>'
 			. '<div class="uf-progress" data-uf-progress hidden><div class="uf-progress-bar"><span></span></div><p data-uf-progress-text></p></div>'
 			. '<div class="uf-alert uf-alert--error" data-uf-upload-error role="alert" hidden></div>'

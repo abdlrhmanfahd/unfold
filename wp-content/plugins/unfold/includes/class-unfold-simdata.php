@@ -93,8 +93,25 @@ class Unfold_SimData {
 		if ( ! $stat || $stat['size'] > self::MAX_FILE ) {
 			return null;
 		}
-		$raw = $zip->getFromIndex( $idx );
-		return false === $raw ? null : $raw;
+		$stream = $zip->getStream( $stat['name'] );
+		if ( ! $stream ) {
+			return null;
+		}
+		$raw = '';
+		while ( ! feof( $stream ) ) {
+			$chunk = fread( $stream, 65536 ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+			if ( false === $chunk ) {
+				fclose( $stream ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+				return null;
+			}
+			$raw .= $chunk;
+			if ( strlen( $raw ) > self::MAX_FILE ) {
+				fclose( $stream ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+				return null;
+			}
+		}
+		fclose( $stream ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		return $raw;
 	}
 
 	/** Logs that hold several runs restart their clock; keep the longest run with increasing time. */

@@ -25,10 +25,11 @@ class Unfold_Validator {
 
 	public static function schema() {
 		if ( null === self::$schema ) {
-			$json         = file_get_contents( UNFOLD_DIR . 'schema/project.schema.json' ); // phpcs:ignore WordPress.WP.AlternativeFunctions
-			self::$schema = json_decode( $json, true );
+			$json         = @file_get_contents( UNFOLD_DIR . 'schema/project.schema.json' ); // phpcs:ignore WordPress.WP.AlternativeFunctions,WordPress.PHP.NoSilencedErrors
+			$decoded      = is_string( $json ) ? json_decode( $json, true ) : null;
+			self::$schema = is_array( $decoded ) ? $decoded : false;
 		}
-		return self::$schema;
+		return is_array( self::$schema ) ? self::$schema : null;
 	}
 
 	/**
@@ -61,8 +62,12 @@ class Unfold_Validator {
 			return array( 'data' => null, 'errors' => array( 'The top level must be a JSON object { ... }, not a list or a single value.' ) );
 		}
 
+		$schema = self::schema();
+		if ( null === $schema ) {
+			return array( 'data' => null, 'errors' => array( 'The project schema could not be loaded.' ) );
+		}
 		$validator = new self();
-		$validator->check( $data, self::schema(), '' );
+		$validator->check( $data, $schema, '' );
 		if ( empty( $validator->errors ) ) {
 			$validator->cross_checks( $data );
 		}

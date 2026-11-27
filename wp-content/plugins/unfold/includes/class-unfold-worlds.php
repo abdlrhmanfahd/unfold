@@ -36,19 +36,26 @@ class Unfold_Worlds {
 		$v = static function ( $rel ) {
 			return UNFOLD_VERSION . '.' . ( is_file( UNFOLD_DIR . $rel ) ? filemtime( UNFOLD_DIR . $rel ) : 0 );
 		};
-		wp_register_style( 'unfold-worlds', UNFOLD_URL . 'assets/css/worlds.css', array(), $v( 'assets/css/worlds.css' ) );
+		wp_register_style( 'unfold-worlds', UNFOLD_URL . 'assets/css/worlds.css', array( 'unfold' ), $v( 'assets/css/worlds.css' ) );
 		wp_register_script( 'unfold-worlds', UNFOLD_URL . 'assets/js/worlds.js', array(), $v( 'assets/js/worlds.js' ), array( 'strategy' => 'defer' ) );
 		wp_register_script( 'unfold-world', UNFOLD_URL . 'assets/js/world.js', array( 'unfold-qcar' ), $v( 'assets/js/world.js' ), array( 'strategy' => 'defer' ) );
 	}
 
 	private static function config() {
 		return array(
-			'rest'     => esc_url_raw( rest_url( Unfold_Rest::NS ) ),
-			'nonce'    => wp_create_nonce( 'wp_rest' ),
-			'worldUrl' => esc_url_raw( Unfold_Portals::url( 'instructor', array( 'world' => '__ID__' ) ) ),
+			'rest'       => esc_url_raw( rest_url( Unfold_Rest::NS ) ),
+			'nonce'      => wp_create_nonce( 'wp_rest' ),
+			'worldUrl'   => esc_url_raw( Unfold_Portals::url( 'instructor', array( 'world' => '__ID__' ) ) ),
 			'workerSeen' => (int) get_option( 'unfold_world_worker_seen', 0 ),
 			'autoStart'  => defined( 'UNFOLD_WORLD_PYTHON' ) && defined( 'UNFOLD_WORLD_WORKER' ),
-			'now'      => time(),
+			'now'        => time(),
+		);
+	}
+
+	private static function public_config() {
+		return array(
+			'rest'  => esc_url_raw( rest_url( Unfold_Rest::NS ) ),
+			'nonce' => is_user_logged_in() ? wp_create_nonce( 'wp_rest' ) : '',
 		);
 	}
 
@@ -73,7 +80,7 @@ class Unfold_Worlds {
 			. '<header class="ufw-head"><a class="ufw-back" href="' . esc_url( $back ) . '">' . esc_html__( '← 3D worlds', 'unfold' ) . '</a>'
 			. '<h1 class="ufw-title">' . esc_html( get_the_title( $world_id ) ) . '</h1>'
 			. ( $pub ? '<a class="ufw-pill ufw-pill--ready" href="' . esc_url( get_permalink( $world_id ) ) . '">' . esc_html__( 'On the site', 'unfold' ) . ' ↗</a>' : '<span class="ufw-pill">' . esc_html__( 'Not published', 'unfold' ) . '</span>' )
-			. '</header>' . self::sim_markup( $world_id ) . '</div>';
+			. '</header>' . self::sim_markup( $world_id, true ) . '</div>';
 	}
 
 	/** Stats line for a world: recordings, metres driven, minutes. */
@@ -94,10 +101,11 @@ class Unfold_Worlds {
 	}
 
 	/** 3D simulation (and, when the world has clips, a "Sensor replay" toggle). */
-	public static function sim_markup( $world_id ) {
+	public static function sim_markup( $world_id, $staff = false ) {
 		wp_enqueue_style( 'unfold-worlds' );
 		wp_enqueue_script( 'unfold-world' );
-		wp_localize_script( 'unfold-world', 'UNFOLD_WORLDS', self::config() + array( 'world' => absint( $world_id ) ) );
+		$cfg = $staff ? self::config() : self::public_config();
+		wp_localize_script( 'unfold-world', 'UNFOLD_WORLDS', $cfg + array( 'world' => absint( $world_id ) ) );
 		$clips  = self::clips( $world_id );
 		$toggle = '';
 		$replay = '';
@@ -635,6 +643,9 @@ class Unfold_Worlds {
 		}
 		$types = array( 'json' => 'application/json', 'png' => 'image/png', 'bin' => 'application/octet-stream' );
 		$ext   = pathinfo( $file, PATHINFO_EXTENSION );
+		if ( headers_sent() ) {
+			return new WP_REST_Response( array( 'file' => $name, 'size' => filesize( $file ) ), 200 );
+		}
 		while ( ob_get_level() ) {
 			ob_end_clean();
 		}
@@ -665,48 +676,55 @@ class Unfold_Worlds {
 
 	/** Claim the oldest waiting recording (or one whose worker went silent). Returns the job, or null. */
 	public static function claim() {
-		$ids = get_posts( array(
-			'post_type'   => self::DRIVE,
-			'post_status' => 'publish',
-			'numberposts' => 20,
-			'orderby'     => 'date',
-			'order'       => 'ASC',
-			'fields'      => 'ids',
-			'meta_query'  => array( array( 'key' => '_unfold_state', 'value' => array( 'queued', 'processing' ), 'compare' => 'IN' ) ), // phpcs:ignore WordPress.DB.SlowDBQuery
-		) );
-		foreach ( $ids as $id ) {
-			$job = get_post_meta( $id, '_unfold_job', true );
-			if ( ! is_array( $job ) || ! self::zip_path( $id ) ) {
-				continue;
-			}
-			$prog = get_post_meta( $id, '_unfold_progress', true );
-			$seen = max( (int) $job['claimed_at'], (int) ( $prog['at'] ?? 0 ) );
-			if ( 'processing' === self::state( $id ) && time() - $seen < self::CLAIM_TIMEOUT ) {
-				continue;
-			}
-			$job['claimed_at'] = time();
-			update_post_meta( $id, '_unfold_job', $job );
-			update_post_meta( $id, '_unfold_state', 'processing' );
-			$d      = get_post( $id );
-			$others = array();
-			foreach ( self::drives( $d->post_parent ) as $o ) {
-				if ( $o->ID !== $id && 'ready' === self::state( $o->ID ) ) {
-					$others[] = array( 'drive_id' => $o->ID, 'out_dir' => self::out_dir( $o->ID ), 'T' => self::transform( $o->ID ), 'placement' => (string) get_post_meta( $o->ID, '_unfold_placement', true ) );
+		$query = static function ( $state ) {
+			return get_posts( array(
+				'post_type'   => self::DRIVE,
+				'post_status' => 'publish',
+				'numberposts' => 20,
+				'orderby'     => 'date',
+				'order'       => 'ASC',
+				'fields'      => 'ids',
+				'meta_query'  => array( array( 'key' => '_unfold_state', 'value' => $state ) ), // phpcs:ignore WordPress.DB.SlowDBQuery
+			) );
+		};
+		foreach ( array( 'queued', 'processing' ) as $target_state ) {
+			foreach ( $query( $target_state ) as $id ) {
+				$job = get_post_meta( $id, '_unfold_job', true );
+				if ( ! is_array( $job ) || ! self::zip_path( $id ) ) {
+					continue;
 				}
+				if ( 'processing' === $target_state ) {
+					$prog = get_post_meta( $id, '_unfold_progress', true );
+					$seen = max( (int) ( $job['claimed_at'] ?? 0 ), (int) ( $prog['at'] ?? 0 ) );
+					if ( time() - $seen < self::CLAIM_TIMEOUT ) {
+						continue;
+					}
+					$job['id'] = wp_generate_password( 24, false, false );
+				}
+				$job['claimed_at'] = time();
+				update_post_meta( $id, '_unfold_job', $job );
+				update_post_meta( $id, '_unfold_state', 'processing' );
+				$d      = get_post( $id );
+				$others = array();
+				foreach ( self::drives( $d->post_parent ) as $o ) {
+					if ( $o->ID !== $id && 'ready' === self::state( $o->ID ) ) {
+						$others[] = array( 'drive_id' => $o->ID, 'out_dir' => self::out_dir( $o->ID ), 'T' => self::transform( $o->ID ), 'placement' => (string) get_post_meta( $o->ID, '_unfold_placement', true ) );
+					}
+				}
+				return array(
+					'drive_id' => $id,
+					'job_id'   => $job['id'],
+					'world_id' => (int) $d->post_parent,
+					'name'     => self::plain_title( $d ),
+					'session'  => (string) get_post_meta( $id, '_unfold_session', true ), // Folder inside the ZIP ('' = root).
+					// The worker runs on the same machine for now; zip_url is there for a remote one.
+					'zip_path' => self::zip_path( $id ),
+					'zip_url'  => rest_url( Unfold_Rest::NS . '/worker/drives/' . $id . '/zip' ),
+					'out_dir'  => self::out_dir( $id ),
+					'others'   => $others,
+					'site'     => home_url(),
+				);
 			}
-			return array(
-				'drive_id' => $id,
-				'job_id'   => $job['id'],
-				'world_id' => (int) $d->post_parent,
-				'name'     => self::plain_title( $d ),
-				'session'  => (string) get_post_meta( $id, '_unfold_session', true ), // Folder inside the ZIP ('' = root).
-				// The worker runs on the same machine for now; zip_url is there for a remote one.
-				'zip_path' => self::zip_path( $id ),
-				'zip_url'  => rest_url( Unfold_Rest::NS . '/worker/drives/' . $id . '/zip' ),
-				'out_dir'  => self::out_dir( $id ),
-				'others'   => $others,
-				'site'     => home_url(),
-			);
 		}
 		return null;
 	}
