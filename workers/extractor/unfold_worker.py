@@ -41,9 +41,21 @@ import requests
 
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
-DEFAULT_OLLAMA_MODEL = "qwen2.5:14b"
+DEFAULT_OLLAMA_MODEL = "qwen3:14b"
 DEFAULT_OPENAI_MODEL = "llama-3.3-70b-versatile"
 DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-1"
+
+_THINKING_MODEL_RE = re.compile(r"(?:^|/)(?:qwen3|deepseek-r1|qwq|gpt-oss|phi4-reasoning|cogito)", re.I)
+
+
+def _is_thinking_model(model: str) -> bool:
+    """Return True when the active Ollama model supports native reasoning traces."""
+    override = os.environ.get("UNFOLD_OLLAMA_THINK")
+    if override == "1":
+        return True
+    if override == "0":
+        return False
+    return bool(_THINKING_MODEL_RE.search((model or "").strip()))
 
 POLL_SECONDS = 10
 MAX_PDF_BYTES = 30 * 1024 * 1024
@@ -420,8 +432,8 @@ def build_context(z: zipfile.ZipFile, files: list[dict], report: str | None) -> 
 
 
 def parse_json(text: str) -> dict:
-    """The JSON object in a reply, tolerating a code fence or stray words around it."""
-    t = text.strip()
+    """The JSON object in a reply, tolerating <think> tags, code fences, or stray words."""
+    t = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
     if t.startswith("```"):
         t = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", t)
     start, end = t.find("{"), t.rfind("}")
@@ -1094,46 +1106,59 @@ class LLMClient:
 
     def _ollama_json(self, system: str, parts: list[dict]) -> tuple[dict, dict]:
         base = (self.base_url or os.environ.get("UNFOLD_OLLAMA_URL", DEFAULT_OLLAMA_URL)).rstrip("/")
+        thinking = _is_thinking_model(self.model)
+        report_cap = 16_000 if thinking else 5_500
+        context_cap = 24_000 if thinking else 5_500
+        total_cap = 40_000 if thinking else 11_500
         text_chunks = []
         for p in parts:
             if p["type"] == "pdf":
-                text_chunks.append(f'<report name="{p["title"]}">\n{pdf_text(p["bytes"], max_chars=5_500)}\n</report>')
+                text_chunks.append(f'<report name="{p["title"]}">\n{pdf_text(p["bytes"], max_chars=report_cap)}\n</report>')
             else:
-                text_chunks.append(p["text"][:5_500])
-        user_text = "\n\n".join(text_chunks)[:11_500]
+                cap = report_cap if p["text"].lstrip().startswith("<report ") else context_cap
+                text_chunks.append(p["text"][:cap])
+        user_text = "\n\n".join(text_chunks)[:total_cap]
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user_text},
         ]
-        num_ctx = int(os.environ.get("UNFOLD_OLLAMA_NUM_CTX", "8192"))
-        num_predict = int(os.environ.get("UNFOLD_OLLAMA_NUM_PREDICT", "2048"))
+        num_ctx = int(os.environ.get("UNFOLD_OLLAMA_NUM_CTX", "16384" if thinking else "8192"))
+        num_predict = int(os.environ.get("UNFOLD_OLLAMA_NUM_PREDICT", "8192" if thinking else "2048"))
         for attempt in (1, 2):
-            r = requests.post(
-                f"{base}/api/chat",
-                json={
-                    "model": self.model,
-                    "messages": messages,
-                    "format": "json",
-                    "stream": True,
-                    "options": {"num_ctx": num_ctx, "num_predict": num_predict, "temperature": 0.1},
-                },
-                stream=True,
-                timeout=(15, 300),
-            )
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "format": "json",
+                "stream": True,
+                "options": {"num_ctx": num_ctx, "num_predict": num_predict, "temperature": 0.1},
+            }
+            if thinking:
+                payload["think"] = True
+            r = requests.post(f"{base}/api/chat", json=payload, stream=True, timeout=(15, 300))
+            if r.status_code == 400 and payload.get("think") is True and "think" in (r.text or "").lower():
+                payload.pop("think", None)
+                r = requests.post(f"{base}/api/chat", json=payload, stream=True, timeout=(15, 300))
             r.raise_for_status()
             chunks: list[str] = []
+            thinking_chars = 0
             prompt_tokens = 0
             eval_tokens = 0
             for raw_line in r.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
                 chunk = json.loads(raw_line)
-                piece = (chunk.get("message") or {}).get("content") or ""
+                msg = chunk.get("message") or {}
+                think_piece = msg.get("thinking") or ""
+                if think_piece:
+                    thinking_chars += len(think_piece)
+                piece = msg.get("content") or ""
                 if piece:
                     chunks.append(piece)
                 if chunk.get("done"):
                     prompt_tokens = int(chunk.get("prompt_eval_count") or 0)
                     eval_tokens = int(chunk.get("eval_count") or 0)
+            if thinking_chars > 0:
+                log.info("ollama thinking: %d chars (%s)", thinking_chars, self.model)
             text = "".join(chunks)
             try:
                 usage = {
@@ -1620,7 +1645,7 @@ def extract_project(client: LLMClient, zip_bytes: bytes, files: list[dict], repo
         return local_rules_extract(zip_bytes, files, report)
     skeleton, _ = local_rules_extract(zip_bytes, files, report)
     parts = build_parts(zip_bytes, files, report)
-    if client.provider == "ollama":
+    if client.provider == "ollama" and not _is_thinking_model(client.model):
         system = SYSTEM_PROMPT + "\n\n" + _OLLAMA_COMPACT_TEMPLATE
     else:
         system = (

@@ -15,7 +15,7 @@ class Unfold_AI {
 	const DEFAULT_MODELS = array(
 		'gemini'        => 'gemini-2.5-flash',
 		'openai_compat' => 'llama-3.3-70b-versatile',
-		'ollama'        => 'qwen2.5:7b',
+		'ollama'        => 'qwen3:8b',
 		'anthropic'     => 'claude-sonnet-4-6',
 		'local_rules'   => 'local_rules',
 	);
@@ -30,7 +30,7 @@ class Unfold_AI {
 			'deepseek/deepseek-chat-v3-0324:free',
 			'google/gemini-2.0-flash-exp:free',
 		),
-		'ollama'        => array( 'qwen2.5:7b', 'qwen2.5:14b', 'llama3.1:8b', 'mistral:7b' ),
+		'ollama'        => array( 'qwen3:14b', 'qwen3:8b', 'deepseek-r1:14b', 'deepseek-r1:8b', 'qwen2.5:14b', 'qwen2.5:7b', 'qwen2.5:3b', 'llama3.1:8b' ),
 		'anthropic'     => array( 'claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-opus-4-1' ),
 	);
 

@@ -3,12 +3,12 @@
  * Enable the built-in Lab Local Ollama preset (and initialize worker token if missing).
  *
  * Usage:
- *   studio wp eval-file deploy/lab/enable-ollama-preset.php qwen2.5:7b workers/extractor/worker-token.txt
+ *   studio wp eval-file deploy/lab/enable-ollama-preset.php qwen3:14b workers/extractor/worker-token.txt
  */
 
 defined( 'ABSPATH' ) || exit;
 
-$model      = isset( $args[0] ) && '' !== trim( (string) $args[0] ) ? sanitize_text_field( (string) $args[0] ) : 'qwen2.5:7b';
+$model      = isset( $args[0] ) && '' !== trim( (string) $args[0] ) ? sanitize_text_field( (string) $args[0] ) : 'qwen3:14b';
 $token_file = isset( $args[1] ) ? trim( (string) $args[1] ) : '';
 
 $presets = Unfold_AI::raw_presets();
