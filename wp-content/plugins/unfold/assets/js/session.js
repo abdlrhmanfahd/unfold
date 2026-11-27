@@ -47,7 +47,8 @@
 		const narrow = () => root.clientWidth < 700;
 		status.textContent = 'Loading the recording…';
 
-		Promise.all( [ fetch( base + 'manifest.json' ).then( r => r.json() ), fetch( base + 'imu.json' ).then( r => r.json() ) ] ).then( ( [ M, IMU ] ) => {
+		const json = r => { if ( ! r.ok ) throw new Error( 'HTTP ' + r.status ); return r.json(); };
+		Promise.all( [ fetch( base + 'manifest.json' ).then( json ), fetch( base + 'imu.json' ).then( json ) ] ).then( ( [ M, IMU ] ) => {
 			status.textContent = '';
 			const frames = M.frames.items, scans = M.lidar.items;
 			const duration = Math.max( frames[ frames.length - 1 ].t, IMU.t[ IMU.t.length - 1 ] );
@@ -59,7 +60,7 @@
 			const images = new Cache( KEEP, i => new Promise( ( ok, fail ) => {
 				const im = new Image(); im.decoding = 'async'; im.onload = () => ok( im ); im.onerror = fail; im.src = base + frames[ i ].file;
 			} ) );
-			const clouds = new Cache( KEEP, k => fetch( base + scans[ k ].file ).then( r => r.arrayBuffer() ).then( buf => {
+			const clouds = new Cache( KEEP, k => fetch( base + scans[ k ].file ).then( r => { if ( ! r.ok ) throw new Error( 'HTTP ' + r.status ); return r.arrayBuffer(); } ).then( buf => {
 				const n = Math.floor( buf.byteLength / 7 );
 				const X = new Int16Array( buf, 0, n ), Y = new Int16Array( buf, 2 * n, n ), Z = new Int16Array( buf, 4 * n, n ), RF = new Uint8Array( buf, 6 * n, n );
 				const pos = new Float32Array( n * 3 ), hz = new Float32Array( n ), rf = new Float32Array( n );
@@ -187,6 +188,7 @@
 			imuCanvas.addEventListener( 'pointerdown', e => { dragging = true; imuCanvas.setPointerCapture( e.pointerId ); seekFromPlot( e ); } );
 			imuCanvas.addEventListener( 'pointermove', e => { if ( dragging ) seekFromPlot( e ); } );
 			imuCanvas.addEventListener( 'pointerup', () => { dragging = false; } );
+			imuCanvas.addEventListener( 'pointercancel', () => { dragging = false; } );
 
 			/* ---------- timeline ---------- */
 			function update() {

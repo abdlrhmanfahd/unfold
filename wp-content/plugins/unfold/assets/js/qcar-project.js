@@ -18,7 +18,7 @@
 		// Gate: publicly, Break it needs the owner's approval and a replay that matches the recorded data.
 		// In the owner preview and instructor review it always shows, with the check result on the card.
 		const checks = {};
-		P.parts.forEach( p => { if ( playable( p ) ) { try { checks[ p.id ] = window.UnfoldTemplates.check( p.template, { inputs: p.inputs, streams: p.streams } ); } catch ( e ) { checks[ p.id ] = { ok: false, text: 'The simulation could not run on this data.' }; } } } );
+		P.parts.forEach( p => { if ( playable( p ) ) { try { checks[ p.id ] = window.UnfoldTemplates.check( p.template, { inputs: p.inputs, streams: p.streams } ); } catch { checks[ p.id ] = { ok: false, text: 'The simulation could not run on this data.' }; } } } );
 		const canPlay = p => playable( p ) && ( P.review || ( p.approved && checks[ p.id ].ok ) );
 		const reviewNote = p => ! P.review || ! playable( p ) ? '' : `<p class="ufp-check ${ checks[ p.id ].ok ? 'is-ok' : 'is-bad' }">${ esc( checks[ p.id ].text ) }</p><p class="ufp-check ${ p.approved ? 'is-ok' : 'is-bad' }">${ p.approved ? 'Approved by the owner.' : 'Not approved yet: tick “Simulation checked” in the form.' }${ checks[ p.id ].ok ? '' : ' Visitors won’t see it until it matches.' }</p>`;
 		const hwNames = p => p.on.map( id => HW[ id ] ? HW[ id ].name : id ).join( ' · ' );
@@ -41,12 +41,13 @@
 			let papers = [], loaded = false;
 			const venue = w => ( w.primary_location && w.primary_location.source && w.primary_location.source.display_name ) || '';
 			const link = w => w.doi || ( w.primary_location && w.primary_location.landing_page_url ) || w.id;
+			const safeUrl = u => ( typeof u === 'string' && /^https?:\/\//i.test( u.trim() ) ) ? u.trim() : '#';
 			function draw( q, note ) {
 				box.innerHTML = `<form class="ufp-res-q"><input type="search" value="${ esc( q ) }" aria-label="Search topic"><button type="submit">Search</button></form>`
 					+ ( note ? `<p class="ufp-res-note">${ esc( note ) }</p>` : '' )
-					+ ( papers.length ? '<ol class="ufp-res-list">' + papers.map( w => `<li><a href="${ esc( link( w ) ) }" target="_blank" rel="noopener">${ esc( w.display_name || '' ) }</a>`
+					+ ( papers.length ? '<ol class="ufp-res-list">' + papers.map( w => `<li><a href="${ esc( safeUrl( link( w ) ) ) }" target="_blank" rel="noopener">${ esc( w.display_name || '' ) }</a>`
 						+ `<span>${ [ w.publication_year, venue( w ), ( w.cited_by_count || 0 ) + ' citations' ].filter( Boolean ).map( esc ).join( ' · ' ) }`
-						+ ( w.open_access && w.open_access.oa_url ? ` · <a href="${ esc( w.open_access.oa_url ) }" target="_blank" rel="noopener">Free PDF</a>` : '' ) + '</span></li>' ).join( '' ) + '</ol>' : '' )
+						+ ( w.open_access && w.open_access.oa_url && safeUrl( w.open_access.oa_url ) !== '#' ? ` · <a href="${ esc( safeUrl( w.open_access.oa_url ) ) }" target="_blank" rel="noopener">Free PDF</a>` : '' ) + '</span></li>' ).join( '' ) + '</ol>' : '' )
 					+ ( papers.length ? '<p class="ufp-res-go"><button type="button" class="ufp-claude">Develop it with Claude</button><small>Opens a chat in Claude with this project and these papers.</small></p>' : '' );
 				box.querySelector( 'form' ).addEventListener( 'submit', e => { e.preventDefault(); search( box.querySelector( 'input' ).value.trim() ); } );
 				const go = box.querySelector( '.ufp-claude' );
@@ -212,7 +213,7 @@
 				const id = decodeURIComponent( location.hash.slice( 1 ) );
 				const target = id ? document.getElementById( id ) : null;
 				if ( target && body.contains( target ) ) set( true );
-			} catch ( e ) {}
+			} catch {}
 		}
 	} );
 } )();

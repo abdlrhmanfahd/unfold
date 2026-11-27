@@ -12,16 +12,17 @@
 		form.querySelectorAll( 'button[name=decision]' ).forEach( function ( b ) { b.addEventListener( 'click', function () { last = b.value; } ); } );
 		form.addEventListener( 'submit', function ( e ) {
 			e.preventDefault();
+			var decision = ( e.submitter && e.submitter.value ) || last;
 			var note = form.note.value.trim();
-			if ( last === 'changes' && ! note ) { msg.textContent = 'Write a note so the owner knows what to change.'; form.note.focus(); return; }
+			if ( decision === 'changes' && ! note ) { msg.textContent = 'Write a note so the owner knows what to change.'; form.note.focus(); return; }
 			form.querySelectorAll( 'button' ).forEach( function ( b ) { b.disabled = true; } );
 			msg.textContent = 'Saving…';
 			fetch( C.rest + '/projects/' + form.getAttribute( 'data-uf-decision' ) + '/review', {
 				method: 'POST', credentials: 'same-origin',
 				headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': C.nonce },
-				body: JSON.stringify( { decision: last, note: note } ),
+				body: JSON.stringify( { decision: decision, note: note } ),
 			} ).then( function ( r ) { return r.json().then( function ( j ) { if ( ! r.ok ) throw new Error( j.message || 'Failed' ); return j; } ); } )
-				.then( function () { msg.textContent = last === 'approve' ? 'Accepted and published.' : 'Returned with notes.'; setTimeout( function () { location.reload(); }, 700 ); } )
+				.then( function () { msg.textContent = decision === 'approve' ? 'Accepted and published.' : 'Returned with notes.'; setTimeout( function () { location.reload(); }, 700 ); } )
 				.catch( function ( err ) { msg.textContent = err.message; form.querySelectorAll( 'button' ).forEach( function ( b ) { b.disabled = false; } ); } );
 		} );
 	}
@@ -32,7 +33,7 @@
 	var host = document.querySelector( '[data-uf-linechart]' );
 	if ( ! host ) return;
 	var data;
-	try { data = JSON.parse( host.getAttribute( 'data-uf-linechart' ) ); } catch ( e ) { return; }
+	try { data = JSON.parse( host.getAttribute( 'data-uf-linechart' ) ); } catch { return; }
 	var SERIES = [
 		{ key: 'view', name: 'Page views', color: '#0F9E8A' },
 		{ key: 'sim', name: 'Simulation uses', color: '#C27A00' },
@@ -42,10 +43,10 @@
 	function fmtDay( d ) { return new Date( d + 'T00:00:00Z' ).toLocaleDateString( undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' } ); }
 
 	function draw() {
+		if ( ! Array.isArray( data ) || ! data.length ) return;
 		host.innerHTML = '';
 		var W = host.clientWidth, H = Math.max( 220, Math.min( 320, Math.round( W * 0.36 ) ) );
-		var L = 40, R = 110, T = 16, B = 28, w = W - L - R, h = H - T - B;
-		if ( W < 520 ) R = 16, w = W - L - R;
+		var L = 40, R = W < 520 ? 16 : 110, T = 16, B = 28, w = Math.max( 40, W - L - R ), h = H - T - B;
 		var max = Math.max( 4, Math.max.apply( null, data.map( function ( d ) { return Math.max( d.view, d.sim ); } ) ) );
 		var step = Math.pow( 10, Math.floor( Math.log10( max / 4 ) ) ) || 1;
 		while ( max / step > 5 ) step *= 2;

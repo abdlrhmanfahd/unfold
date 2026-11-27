@@ -14,7 +14,7 @@
 		return fetch( C.rest + path, opts ).then( function ( r ) {
 			return r.text().then( function ( t ) {
 				var j = null;
-				try { j = t ? JSON.parse( t ) : null; } catch ( e ) {}
+				try { j = t ? JSON.parse( t ) : null; } catch {}
 				if ( ! r.ok ) { var err = new Error( ( j && j.message ) || ( 'Request failed (' + r.status + ')' ) ); err.data = j; throw err; }
 				return j;
 			} );
@@ -49,7 +49,13 @@
 
 	function bindDrop( zone, onFile ) {
 		var input = zone.querySelector( 'input[type=file]' );
-		input.addEventListener( 'change', function () { if ( input.files[ 0 ] ) onFile( input.files[ 0 ] ); } );
+		input.addEventListener( 'change', function () {
+			if ( input.files[ 0 ] ) {
+				var f = input.files[ 0 ];
+				input.value = '';
+				onFile( f );
+			}
+		} );
 		[ 'dragenter', 'dragover' ].forEach( function ( ev ) { zone.addEventListener( ev, function ( e ) { e.preventDefault(); zone.classList.add( 'is-over' ); } ); } );
 		[ 'dragleave', 'drop' ].forEach( function ( ev ) { zone.addEventListener( ev, function ( e ) { e.preventDefault(); zone.classList.remove( 'is-over' ); } ); } );
 		zone.addEventListener( 'drop', function ( e ) { var f = e.dataTransfer.files[ 0 ]; if ( f ) onFile( f ); } );
@@ -152,7 +158,9 @@
 
 		var retry = ws.querySelector( '[data-uf-retry]' );
 		if ( retry ) retry.addEventListener( 'click', function () {
-			api( 'POST', '/projects/' + C.project + '/extract', {} ).then( function ( p ) { P = p; render(); } );
+			api( 'POST', '/projects/' + C.project + '/extract', {} ).then( function ( p ) { P = p; render(); } ).catch( function ( e ) {
+				ws.innerHTML = '<div class="uf-alert uf-alert--error">' + esc( e.message ) + '</div>';
+			} );
 		} );
 
 		if ( editing ) mountEditor();

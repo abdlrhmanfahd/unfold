@@ -282,7 +282,7 @@
 				preview.innerHTML = '';
 				arr.forEach( function ( eq ) {
 					var d = el( 'div', { class: 'uff-eq' } );
-					try { window.katex.render( eq, d, { displayMode: true, throwOnError: false } ); } catch ( e ) { d.textContent = eq; }
+					try { window.katex.render( eq, d, { displayMode: true, throwOnError: false } ); } catch { d.textContent = eq; }
 					preview.appendChild( d );
 				} );
 			}
@@ -302,7 +302,7 @@
 			return humanize( key ).replace( /s$/, '' ) + ' ' + ( i + 1 );
 		}
 
-		function objectArray( path, key, s, arr, container ) {
+		function objectArray( path, key, s, arr ) {
 			var itemS = resolve( s.items );
 			var box = el( 'div', { class: 'uff-array', 'data-path': path } );
 			function draw() {
@@ -391,7 +391,7 @@
 		Object.keys( schema.properties ).forEach( function ( k ) {
 			if ( HIDDEN[ k ] ) return;
 			var s = resolve( schema.properties[ k ] );
-			if ( data[ k ] === undefined ) data[ k ] = blank( s );
+			if ( data[ k ] === undefined || data[ k ] === null ) data[ k ] = blank( s );
 			var sec = el( 'section', { class: 'uff-section', id: 'uff-sec-' + k, 'data-path': k } );
 			var head = el( 'header', { class: 'uff-section-head' }, [ el( 'h3', { text: labelFor( k, k ) } ) ] );
 			var confirmAll = el( 'button', {

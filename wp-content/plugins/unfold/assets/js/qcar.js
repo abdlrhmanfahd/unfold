@@ -53,17 +53,17 @@
 
 	/* ---------- the QCar 2 (x forward, y up, z right; 1 unit = 10 cm), modelled on Quanser's product photos ---------- */
 	function buildCar( scene, piece ) {
-		const alu = mat( 0xB9C1C9, { metalness: .7, roughness: .3 } );
+		const alu = () => mat( 0xB9C1C9, { metalness: .7, roughness: .3 } );
 		const blk = () => mat( 0x15181B, { roughness: .55, metalness: .2 } );
 		const lens = () => mat( 0x1E2A36, { roughness: .1, metalness: .6 } );
 
 		{ const g = group( at( plate( 3.0, .95, .06, .2, [ [ .2, 0, .45, .22 ] ], mat( 0x1D2125, { roughness: .6, metalness: .3 } ) ), 0, .3, 0 ),
 			at( box( .3, .34, .5, blk() ), 1.55, .5, 0 ), at( box( .3, .3, .5, blk() ), -1.55, .5, 0 ) );
-		[ [ 1.45, .42 ], [ 1.45, -.42 ], [ -1.45, .42 ], [ -1.45, -.42 ], [ .3, .5 ], [ .3, -.5 ] ].forEach( ( [ x, z ] ) => g.add( at( cyl( .035, .035, .46, alu, 10 ), x, .55, z ) ) );
+		[ [ 1.45, .42 ], [ 1.45, -.42 ], [ -1.45, .42 ], [ -1.45, -.42 ], [ .3, .5 ], [ .3, -.5 ] ].forEach( ( [ x, z ] ) => g.add( at( cyl( .035, .035, .46, alu(), 10 ), x, .55, z ) ) );
 		piece( scene, 'chassis', g ); }
 		{ const g = new THREE.Group(), red = mat( 0xC62828, { roughness: .35, metalness: .3 } );
 			[ [ 1.12, 1 ], [ 1.12, -1 ], [ -1.12, 1 ], [ -1.12, -1 ] ].forEach( ( [ x, s ] ) => {
-				const sh = group( at( cyl( .03, .03, .42, alu, 10 ), 0, 0, 0 ) );
+				const sh = group( at( cyl( .03, .03, .42, alu(), 10 ), 0, 0, 0 ) );
 				for ( let k = 0; k < 7; k++ ) { const r = new THREE.Mesh( new THREE.TorusGeometry( .055, .014, 6, 14 ), red ); r.rotation.x = Math.PI / 2; r.position.y = -.15 + k * .05; sh.add( r ); }
 				sh.position.set( x, .52, s * .6 ); sh.rotation.x = s * .35; g.add( sh );
 			} );
@@ -84,7 +84,7 @@
 		piece( scene, 'chassis', group( side( 1 ) ), [ 0, 0, 1.35 ], .18 );
 		piece( scene, 'chassis', group( side( -1 ) ), [ 0, 0, -1.35 ], .18 );
 		{ const tp = group( at( plate( 1.75, 1.5, .045, .12, [], mat( 0x15181B, { roughness: .5, metalness: .3 } ) ), 0, 0, 0 ) );
-			[ [ .75, .62 ], [ .75, -.62 ], [ -.75, .62 ], [ -.75, -.62 ] ].forEach( ( [ x, z ] ) => { const n = cyl( .055, .055, .1, alu, 12 ); n.position.set( x, .07, z ); tp.add( n ); } );
+			[ [ .75, .62 ], [ .75, -.62 ], [ -.75, .62 ], [ -.75, -.62 ] ].forEach( ( [ x, z ] ) => { const n = cyl( .055, .055, .1, alu(), 12 ); n.position.set( x, .07, z ); tp.add( n ); } );
 			piece( scene, 'chassis', at( tp, .2, 1.795, 0 ), [ 0, 1.2, 0 ], .26 ); }
 
 		[ [ 1.28, 1 ], [ 1.28, -1 ], [ -1.28, 1 ], [ -1.28, -1 ] ].forEach( ( [ x, s ], i ) => {
@@ -109,11 +109,11 @@
 		{ const e = cyl( .12, .12, .08, mat( 0x0B8A7A, { metalness: .3, roughness: .4 } ), 28 ); e.rotation.z = Math.PI / 2;
 			const pcb = box( .03, .22, .22, mat( 0x1C3D57 ) ); pcb.position.x = -.05;
 			piece( scene, 'encoder', at( group( e, pcb ), -.72, .5, -.2 ), [ -1.15, .3, -2.05 ], .16 ); }
-		piece( scene, 'servo', at( group( at( box( .36, .22, .42, blk() ), 0, 0, 0 ), at( cyl( .06, .06, .1, alu, 16 ), .08, .15, 0 ), at( box( .05, .04, 1.3, alu ), .25, -.05, 0 ) ), .95, .48, .15 ), [ .9, -.05, 1.75 ], .1 );
+		piece( scene, 'servo', at( group( at( box( .36, .22, .42, blk() ), 0, 0, 0 ), at( cyl( .06, .06, .1, alu(), 16 ), .08, .15, 0 ), at( box( .05, .04, 1.3, alu() ), .25, -.05, 0 ) ), .95, .48, .15 ), [ .9, -.05, 1.75 ], .1 );
 
 		{ const g = group( at( box( 3.55, .05, 1.3, mat( 0x0E1114, { roughness: .45 } ) ), 0, 0, 0 ) );
 			[ [ .4, .3, .3, .2 ], [ -.3, -.35, .22, .18 ], [ .65, -.42, .2, .2 ], [ -.1, .38, .18, .14 ] ].forEach( ( [ x, z, w, d ] ) => g.add( at( box( w, .07, d, mat( 0x23292E ) ), x, .05, z ) ) );
-			g.add( at( box( .22, .16, .2, alu ), .15, .1, .45 ) );
+			g.add( at( box( .22, .16, .2, alu() ), .15, .1, .45 ) );
 			g.add( at( box( .12, .1, .16, mat( 0xF0A020, { roughness: .4 } ) ), .9, .07, .5 ) );
 			const lcd = group( at( box( .5, .04, .42, mat( 0x0B0D0F ) ), 0, 0, 0 ), at( box( .44, .012, .34, mat( 0x0D2233, { emissive: 0x2C7DA0, emissiveIntensity: .5, roughness: .2 } ) ), 0, .026, 0 ) );
 			lcd.position.set( 1.12, .05, -.05 ); g.add( lcd );
@@ -136,7 +136,7 @@
 		{ const g = group( at( box( .95, .12, .95, mat( 0x1B1F23 ) ), 0, 0, 0 ) );
 			for ( let k = 0; k < 16; k++ ) g.add( at( box( .9, .2, .025, mat( 0x2B3036, { metalness: .5, roughness: .4 } ) ), 0, .16, -.44 + k * .058 ) );
 			g.add( at( box( .95, .1, .95, mat( 0x121417 ) ), 0, .31, 0 ) );
-			[ .12, .22, .32 ].forEach( r => { const tr = new THREE.Mesh( new THREE.TorusGeometry( r, .012, 6, 32 ), alu ); tr.rotation.x = Math.PI / 2; tr.position.y = .37; g.add( tr ); } );
+			[ .12, .22, .32 ].forEach( r => { const tr = new THREE.Mesh( new THREE.TorusGeometry( r, .012, 6, 32 ), alu() ); tr.rotation.x = Math.PI / 2; tr.position.y = .37; g.add( tr ); } );
 			const hub = cyl( .08, .08, .03, mat( 0x0B8A7A ), 20 ); hub.position.y = .37; g.add( hub );
 			piece( scene, 'compute', at( g, -1.05, .98, 0 ), [ -.55, 1.3, 0 ], .28 ); }
 		{ const k = mat( 0x17191C, { roughness: .45 } );
@@ -304,7 +304,7 @@
 		let last = performance.now();
 		function loop( now ) {
 			const dt = Math.min( .05, ( now - last ) / 1000 ); last = now;
-			if ( ! stage.clientWidth || ! stage.clientHeight ) { leaders.innerHTML = ''; requestAnimationFrame( loop ); return; } // Not visible: draw nothing.
+			if ( document.hidden || ! stage.clientWidth || ! stage.clientHeight ) { leaders.innerHTML = ''; requestAnimationFrame( loop ); return; } // Not visible: draw nothing.
 			const prev = t;
 			t += ( target - t ) * Math.min( 1, dt * 3.2 ); if ( Math.abs( target - t ) < .0005 ) t = target;
 			if ( prev !== t ) slider.value = t;
@@ -321,7 +321,7 @@
 		}
 
 		try { init(); buildLabels(); bindPicking(); requestAnimationFrame( loop ); }
-		catch ( e ) { stage.classList.add( 'ufq--nogl' ); dock.hidden = true; }
+		catch { stage.classList.add( 'ufq--nogl' ); dock.hidden = true; }
 
 		return {
 			focus( ids, fromEl ) { picked = null; focusSet = ids && ids.length ? new Set( ids ) : null; focusFrom = fromEl || null; if ( focusSet && t < .5 ) setTarget( 1 ); },

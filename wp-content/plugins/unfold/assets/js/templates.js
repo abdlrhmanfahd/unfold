@@ -44,15 +44,19 @@
 			const C = Object.assign( {}, this.defaults, ctx.inputs ), DT = .01;
 			const routeS = ctx.streams.find( s => s.role === 'route' && ! s.error );
 			if ( ! routeS ) return null;
-			const [ RX, RY ] = cols( routeS ), R = RX.map( ( x, i ) => [ x, RY[ i ] ] ).filter( p => p[ 0 ] !== null && p[ 1 ] !== null );
+			const routeCols = cols( routeS );
+			if ( routeCols.length < 2 ) return null;
+			const [ RX, RY ] = routeCols, R = RX.map( ( x, i ) => [ x, RY[ i ] ] ).filter( p => p[ 0 ] !== null && p[ 1 ] !== null );
 			const speedS = ctx.streams.find( s => s.role === 'speed' && ! s.error );
-			const ST = speedS ? cols( speedS )[ 0 ] : [], SV = speedS ? cols( speedS )[ 1 ] : [];
-			const speedAt = t => speedS ? interp( ST, SV, t ) : C.v_ref;
-			const runs = ctx.streams.filter( s => s.role === 'run' && ! s.error ).map( ( s, i ) => ( { label: s.label || 'Recorded run', t: cols( s )[ 0 ], e: cols( s )[ 1 ], set: setOf( s ), color: RUN_COLORS[ i % RUN_COLORS.length ] } ) );
+			const speedCols = speedS ? cols( speedS ) : [];
+			const ST = speedCols.length >= 2 ? speedCols[ 0 ] : [], SV = speedCols.length >= 2 ? speedCols[ 1 ] : [];
+			const speedAt = t => speedCols.length >= 2 ? interp( ST, SV, t ) : C.v_ref;
+			const runs = ctx.streams.filter( s => s.role === 'run' && ! s.error && cols( s ).length >= 2 ).map( ( s, i ) => ( { label: s.label || 'Recorded run', t: cols( s )[ 0 ], e: cols( s )[ 1 ], set: setOf( s ), color: RUN_COLORS[ i % RUN_COLORS.length ] } ) );
 
 			const seg = [];
 			for ( let i = 0; i < R.length - 1; i++ ) { const dx = R[ i + 1 ][ 0 ] - R[ i ][ 0 ], dy = R[ i + 1 ][ 1 ] - R[ i ][ 1 ], L = Math.hypot( dx, dy ); if ( L > 1e-9 ) seg.push( { ax: R[ i ][ 0 ], ay: R[ i ][ 1 ], dx, dy, L } ); }
 			const NS = seg.length;
+			if ( R.length < 2 || ! NS ) return null;
 			const proj = ( s, px, py ) => { let u = ( ( px - s.ax ) * s.dx + ( py - s.ay ) * s.dy ) / ( s.L * s.L ); u = Math.max( 0, Math.min( 1, u ) ); const qx = s.ax + u * s.dx, qy = s.ay + u * s.dy; return { qx, qy, d: Math.hypot( px - qx, py - qy ), cross: ( s.dx * ( py - s.ay ) - s.dy * ( px - s.ax ) ) / s.L }; };
 			function Matcher( px, py ) { let b = Infinity; this.i = 0; for ( let j = 0; j < NS; j++ ) { const r = proj( seg[ j ], px, py ); if ( r.d < b ) { b = r.d; this.i = j; } } }
 			Matcher.prototype.update = function ( px, py ) { let best = null, bi = this.i, acc = 0; for ( let n = 0; n < NS && acc <= 1.5; n++ ) { const j = ( this.i + n ) % NS, r = proj( seg[ j ], px, py ); if ( ! best || r.d < best.d - 1e-12 ) { best = r; bi = j; } acc += seg[ j ].L; } this.i = bi; best.i = bi; return best; };
@@ -89,6 +93,7 @@
 			return { ok: worst <= TOL_PATH, text: 'Matches the recorded runs within ' + ( worst * 1000 ).toFixed( 0 ) + ' mm (limit ' + TOL_PATH * 1000 + ' mm).' };
 		},
 		mount( root, ctx ) {
+			try {
 			const M = this.model( ctx ), EXAG = 20;
 			if ( ! M ) { root.innerHTML = '<p class="ufs-note">This simulation needs the route from the project files.</p>'; return () => {}; }
 			const { C, R, runs, simulate, checks } = M;
@@ -118,7 +123,7 @@
 			const $ = id => root.querySelector( '#' + id );
 
 			$( 'preal' ).textContent = 'Built from the project\'s route, controller, gains, start position and measured speed. Position is perfect and steering instant, so the recorded runs are noisier.'
-				+ ( checks.length ? ' Replaying the recorded runs: ' + checks.map( c => c.label + ' within ' + ( c.rms * 1000 ).toFixed( 1 ) + ' mm (rms)' ).join( ', ' ) + '.' : '' );
+				+ ( checks.length ? ' Replaying the recorded runs: ' + checks.map( c => c.label + ( c.rms === null ? ': no matching points' : ' within ' + ( c.rms * 1000 ).toFixed( 1 ) + ' mm (rms)' ) ).join( ', ' ) + '.' : '' );
 
 			const bb = [ Infinity, Infinity, -Infinity, -Infinity ]; R.forEach( p => { bb[ 0 ] = Math.min( bb[ 0 ], p[ 0 ] ); bb[ 1 ] = Math.min( bb[ 1 ], p[ 1 ] ); bb[ 2 ] = Math.max( bb[ 2 ], p[ 0 ] ); bb[ 3 ] = Math.max( bb[ 3 ], p[ 1 ] ); } );
 			const st = { b: C.b, fix: C.bhat > 0, bhat: C.bhat > 0 ? C.bhat : C.b, k: C.k };
@@ -154,8 +159,9 @@
 			}
 			function drawMap() {
 				const c = $( 'pmap' ), w = c.clientWidth, h = Math.max( 220, Math.min( 380, Math.round( w * .52 ) ) );
-				const { g } = canvas( c, h ), pad = 18, sc = Math.min( ( w - 2 * pad ) / ( bb[ 2 ] - bb[ 0 ] ), ( h - 2 * pad ) / ( bb[ 3 ] - bb[ 1 ] ) );
-				const ox = ( w - sc * ( bb[ 2 ] - bb[ 0 ] ) ) / 2, oy = ( h - sc * ( bb[ 3 ] - bb[ 1 ] ) ) / 2, X = x => ox + ( x - bb[ 0 ] ) * sc, Y = y => h - ( oy + ( y - bb[ 1 ] ) * sc );
+				const { g } = canvas( c, h ), pad = 18, spanX = Math.max( 1e-6, bb[ 2 ] - bb[ 0 ] ), spanY = Math.max( 1e-6, bb[ 3 ] - bb[ 1 ] );
+				const sc = Math.min( ( w - 2 * pad ) / spanX, ( h - 2 * pad ) / spanY );
+				const ox = ( w - sc * spanX ) / 2, oy = ( h - sc * spanY ) / 2, X = x => ox + ( x - bb[ 0 ] ) * sc, Y = y => h - ( oy + ( y - bb[ 1 ] ) * sc );
 				const line = () => { g.beginPath(); R.forEach( ( p, i ) => i ? g.lineTo( X( p[ 0 ] ), Y( p[ 1 ] ) ) : g.moveTo( X( p[ 0 ] ), Y( p[ 1 ] ) ) ); };
 				g.clearRect( 0, 0, w, h ); g.lineJoin = 'round'; g.lineCap = 'round';
 				const road = Math.min( 2 * C.corridor * EXAG * sc, 28 );
@@ -199,6 +205,10 @@
 			raf = requestAnimationFrame( frame );
 			const ro = new ResizeObserver( () => draw() ); ro.observe( root );
 			return () => { alive = false; cancelAnimationFrame( raf ); ro.disconnect(); };
+			} catch {
+				root.innerHTML = '<p class="ufs-note">Could not render simulation.</p>';
+				return () => {};
+			}
 		},
 	};
 
@@ -206,12 +216,19 @@
 	   speed_loop: PI speed control with anti-windup on a first-order motor,
 	   the motor fitted to the project's recorded speed.
 	   ================================================================== */
+	const speedCache = new WeakMap();
 	const speedLoop = {
 		label: 'Speed control',
 		defaults: { v_ref: .6, kp: .1, ki: 1, umax: .3 },
 		model( ctx ) {
+			if ( ctx && typeof ctx === 'object' && speedCache.has( ctx ) ) return speedCache.get( ctx );
 			const P = Object.assign( {}, this.defaults, ctx.inputs ), VREF = P.v_ref, TEND = 12, DT = .01;
-			const runs = ctx.streams.filter( s => s.role === 'run' && ! s.error ).map( s => { const [ T, V ] = cols( s ); return { label: s.label || 'Recorded', pts: T.map( ( t, i ) => [ t, V[ i ] ] ).filter( p => p[ 0 ] <= TEND && p[ 1 ] !== null ) }; } );
+			const runs = ctx.streams.filter( s => s.role === 'run' && ! s.error ).map( s => {
+				const pair = cols( s );
+				if ( pair.length < 2 ) return { label: s.label || 'Recorded', pts: [] };
+				const [ T, V ] = pair;
+				return { label: s.label || 'Recorded', pts: T.map( ( t, i ) => [ t, V[ i ] ] ).filter( p => p[ 0 ] !== null && p[ 0 ] >= 0 && p[ 0 ] <= TEND && p[ 1 ] !== null ) };
+			} );
 			const meas = runs.length ? runs[ 0 ].pts : [];
 			function run( kp, ki, umax, aw, hill, K, tau ) {
 				let v = 0, I = 0; const out = []; let peak = 0, settle = null, post = 0, hillSat = false; const dh = -.4 * VREF / K;
@@ -233,7 +250,9 @@
 				for ( const [ mt, mv ] of meas ) { const j = Math.min( r.out.length - 1, Math.round( mt / .05 ) ); err += ( r.out[ j ][ 1 ] - mv ) ** 2; }
 				err = Math.sqrt( err / meas.length ); if ( err < best.err ) best = { err, K, tau };
 			}
-			return { P, VREF, TEND, runs, meas, run, best };
+			const result = { P, VREF, TEND, runs, meas, run, best };
+			if ( ctx && typeof ctx === 'object' ) speedCache.set( ctx, result );
+			return result;
 		},
 		/** Fit check without drawing: ok when the fitted motor follows the recorded speed within TOL_SPEED. */
 		check( ctx ) {

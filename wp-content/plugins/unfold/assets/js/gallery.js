@@ -12,7 +12,7 @@
 			var shown = 0;
 			cards.forEach( function ( c ) {
 				var keys = [];
-				try { keys = JSON.parse( c.getAttribute( 'data-keywords' ) || '[]' ); } catch ( e ) {}
+				try { keys = JSON.parse( c.getAttribute( 'data-keywords' ) || '[]' ); } catch {}
 				var ok = ! kw.value || keys.indexOf( kw.value ) !== -1;
 				c.hidden = ! ok;
 				if ( ok ) shown++;

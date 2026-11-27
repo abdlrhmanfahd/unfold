@@ -41,7 +41,7 @@
 		try {
 			ta.value = JSON.stringify( JSON.parse( ta.value ), null, 2 );
 			check();
-		} catch ( e ) {
+		} catch {
 			check();
 		}
 	} );
