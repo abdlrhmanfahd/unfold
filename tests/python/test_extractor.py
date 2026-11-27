@@ -251,6 +251,46 @@ class ExtractorWorkerTests(unittest.TestCase):
             self.assertIn("Fleet Robot", prompt)
             self.assertTrue(get_mock.called)
 
+    def test_build_context_includes_extra_docs_md_csv_stats_and_deep_code(self):
+        docx_buf = io.BytesIO()
+        doc_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+            '<w:p><w:r><w:t>Extra appendix DOCX content with sensor specs.</w:t></w:r></w:p>'
+            '</w:body></w:document>'
+        )
+        with zipfile.ZipFile(docx_buf, "w") as dz:
+            dz.writestr("word/document.xml", doc_xml)
+
+        py_lines = [f"# line {i}" for i in range(1, 50)]
+        py_lines[44] = "DEEP_PARAM_GAIN = 2.75"
+        py_src = "\n".join(py_lines)
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("main_report.pdf", b"%PDF-1.4\nstream\nBT\n(Main Report Body)\nET\nendstream\n%%EOF")
+            z.writestr("appendix_specs.docx", docx_buf.getvalue())
+            z.writestr("slides_summary.pdf", b"%PDF-1.4\nstream\nBT\n(Extra PDF Slides Text)\nET\nendstream\n%%EOF")
+            z.writestr("README.md", "# Project Notes\nLiDAR runs at 10 Hz.")
+            z.writestr("runs.csv", "t,speed_mps\n0.0,0.2\n0.1,0.4\n0.2,0.6\n")
+            z.writestr("controller.py", py_src)
+
+        files = [
+            {"path": "main_report.pdf", "size": 100, "kind": "report", "blocked": False},
+            {"path": "appendix_specs.docx", "size": 200, "kind": "report", "blocked": False},
+            {"path": "slides_summary.pdf", "size": 100, "kind": "report", "blocked": False},
+            {"path": "README.md", "size": 50, "kind": "code", "blocked": False},
+            {"path": "runs.csv", "size": 60, "kind": "data", "blocked": False},
+            {"path": "controller.py", "size": 400, "kind": "code", "blocked": False},
+        ]
+        ctx = uw.build_context(zipfile.ZipFile(io.BytesIO(buf.getvalue())), files, "main_report.pdf")
+        self.assertIn("Extra appendix DOCX content with sensor specs.", ctx)
+        self.assertIn("Extra PDF Slides Text", ctx)
+        self.assertIn("LiDAR runs at 10 Hz.", ctx)
+        self.assertIn("estimated_sample_rate_hz: 10.0", ctx)
+        self.assertIn("speed_mps: min=0.2, mean=0.4, max=0.6, last=0.6", ctx)
+        self.assertIn("DEEP_PARAM_GAIN = 2.75", ctx)
+
 
 if __name__ == "__main__":
     unittest.main()

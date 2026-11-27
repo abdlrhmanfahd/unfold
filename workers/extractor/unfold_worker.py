@@ -22,10 +22,12 @@ import argparse
 import ast
 import base64
 import copy
+import csv
 import html
 import io
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -45,7 +47,7 @@ DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-1"
 
 POLL_SECONDS = 10
 MAX_PDF_BYTES = 30 * 1024 * 1024
-MAX_CONTEXT_CHARS = 90_000
+MAX_CONTEXT_CHARS = 120_000
 BRIEF_VERSION = "1"
 
 log = logging.getLogger("unfold-worker")
@@ -257,14 +259,70 @@ def human_size(n: int) -> str:
     return f"{n / 1048576:.1f} MB" if n > 1048576 else f"{max(1, n // 1024)} KB"
 
 
+def _summarize_csv(z: zipfile.ZipFile, path: str) -> str:
+    """Summarize headers, sample rows, numeric min/mean/max, and sample rate from a CSV/TSV."""
+    delim = "\t" if path.lower().endswith(".tsv") else ","
+    try:
+        with z.open(path) as fh:
+            raw_bytes = fh.read(262_144)
+    except Exception:  # noqa: BLE001
+        return ""
+    raw = raw_bytes.decode("utf-8", "replace")
+    lines = raw.splitlines()
+    if len(raw_bytes) == 262_144 and len(lines) > 2:
+        lines = lines[:-1]
+    rows = list(csv.reader(lines[:2001], delimiter=delim))
+    if not rows:
+        return ""
+    header = [c.strip() for c in rows[0][:12]]
+    data_rows = rows[1:]
+    out = [f"columns: {', '.join(header)} (sampled rows: {len(data_rows)})"]
+    for row in data_rows[:3]:
+        out.append("  sample: " + ", ".join(c.strip()[:60] for c in row[:12]))
+
+    stats_lines = []
+    time_names = {"t", "time", "t_s", "timestamp", "t_send", "t_req", "sec"}
+    sample_hz = None
+    for idx, col in enumerate(header):
+        vals: list[float] = []
+        for row in data_rows:
+            if idx >= len(row):
+                continue
+            try:
+                v = float(row[idx].strip())
+            except ValueError:
+                continue
+            if math.isfinite(v):
+                vals.append(v)
+        if not vals:
+            continue
+        if sample_hz is None and col.lower() in time_names and len(vals) >= 2:
+            dts = [vals[i + 1] - vals[i] for i in range(len(vals) - 1) if vals[i + 1] > vals[i]]
+            if dts:
+                avg_dt = sum(dts) / len(dts)
+                if avg_dt > 0:
+                    sample_hz = round(1.0 / avg_dt, 2)
+        stats_lines.append(
+            f"  {col}: min={min(vals):.4g}, mean={sum(vals) / len(vals):.4g}, max={max(vals):.4g}, last={vals[-1]:.4g}"
+        )
+    if sample_hz is not None:
+        out.append(f"estimated_sample_rate_hz: {sample_hz}")
+    if stats_lines:
+        out.append("numeric_summary:\n" + "\n".join(stats_lines))
+    return "\n".join(out)
+
+
 def build_context(z: zipfile.ZipFile, files: list[dict], report: str | None) -> str:
-    """Inventory plus the most informative small files, within a fixed character budget."""
+    """Inventory plus extra PDFs/DOCXs, MD files, CSV stats, and runtime code within budget."""
     parts: list[str] = []
     budget = MAX_CONTEXT_CHARS
 
     def add(title: str, body: str) -> bool:
         nonlocal budget
-        chunk = f'<file name="{title}">\n{body.strip()}\n</file>\n'
+        clean = (body or "").strip()
+        if not clean:
+            return False
+        chunk = f'<file name="{title}">\n{clean}\n</file>\n'
         if len(chunk) > budget:
             return False
         parts.append(chunk)
@@ -285,39 +343,78 @@ def build_context(z: zipfile.ZipFile, files: list[dict], report: str | None) -> 
         else:
             for it in items:
                 inv.append(f"{it['path']}  [{it['kind']}, {human_size(it['size'])}]")
-    inventory = "\n".join(inv)
-    parts.append(f"<inventory count=\"{len(files)}\">\n{inventory[:30000]}\n</inventory>\n")
-    budget -= min(len(inventory), 30000)
+    inventory = "\n".join(inv)[:25_000]
+    parts.append(f"<inventory count=\"{len(files)}\">\n{inventory}\n</inventory>\n")
+    budget -= len(inventory)
 
     readable = {f["path"]: f for f in files if not f.get("blocked")}
+
+    # Extra PDF / DOCX documents besides the primary report (appendices, slides, design docs).
+    extra_docs = [
+        (p, f) for p, f in readable.items()
+        if p != report and p.lower().endswith((".pdf", ".docx")) and f["size"] <= MAX_PDF_BYTES
+    ]
+
+    def _doc_priority(item: tuple[str, dict]) -> tuple[int, str]:
+        low = item[0].lower()
+        score = 0
+        if any(k in low for k in ("report", "result", "appendix", "slide", "summary", "design", "analysis", "final", "problem", "method")):
+            score -= 20
+        if any(k in low for k in ("template", "rubric", "blank")):
+            score += 20
+        return (score, low)
+
+    added_docs = 0
+    for path, _f in sorted(extra_docs, key=_doc_priority):
+        try:
+            raw_doc = z.read(path)
+            doc_txt = pdf_text(raw_doc, max_chars=12_000) if path.lower().endswith(".pdf") else docx_text(raw_doc)[:12_000]
+        except Exception:  # noqa: BLE001
+            doc_txt = ""
+        if doc_txt and add(path, doc_txt):
+            added_docs += 1
+        if added_docs >= 4:
+            break
 
     for path, f in readable.items():
         name = PurePosixPath(path).name.lower()
         if path == report:
             continue
-        if (name.startswith("readme") or name.endswith(".md")) and f["size"] < 40_000 or (
-            name.endswith(".json") and f["size"] < 12_000 and ("config" in name or "calibration" in name or "result" in name or "analysis" in name)
+        if ((name.startswith("readme") or name.endswith(".md")) and f["size"] < 40_000) or (
+            name.endswith(".json") and f["size"] < 16_000 and any(k in name for k in ("config", "calibration", "result", "analysis", "metric"))
         ):
             add(path, z.read(path).decode("utf-8", "replace"))
 
-    seen_headers = set()
-    for path, _f in readable.items():
-        if not path.lower().endswith((".csv", ".tsv")):
+    csv_paths = [p for p in readable if p.lower().endswith((".csv", ".tsv"))]
+
+    def _csv_priority(p: str) -> tuple[int, str]:
+        low = PurePosixPath(p).name.lower()
+        score = 0 if any(k in low for k in ("summary", "result", "metric", "score", "run", "block", "calib", "eval")) else 10
+        return (score, low)
+
+    seen_headers: set[str] = set()
+    added_csv = 0
+    for path in sorted(csv_paths, key=_csv_priority):
+        try:
+            with z.open(path) as fh:
+                first_line = fh.read(2048).decode("utf-8", "replace").splitlines()[0]
+        except Exception:  # noqa: BLE001
+            first_line = ""
+        if first_line in seen_headers:
             continue
-        with z.open(path) as fh:
-            head = fh.read(4000).decode("utf-8", "replace").splitlines()[:3]
-        key = head[0] if head else ""
-        if key in seen_headers:
-            continue
-        seen_headers.add(key)
-        if not add(path, "first lines:\n" + "\n".join(line[:400] for line in head)):
+        seen_headers.add(first_line)
+        summary = _summarize_csv(z, path)
+        if summary and add(path, summary):
+            added_csv += 1
+        if added_csv >= 15:
             break
 
-    for path, f in readable.items():
-        if f["kind"] == "code" and path.lower().endswith((".py", ".m")) and f["size"] < 200_000:
-            text = z.read(path).decode("utf-8", "replace").splitlines()[:30]
-            if not add(path, "first 30 lines:\n" + "\n".join(text)):
-                break
+    code_paths = [p for p, f in readable.items() if f["kind"] == "code" and p.lower().endswith((".py", ".m")) and f["size"] < 200_000]
+    runtime_paths = [p for p in code_paths if not _HELPER_CODE_RE.search(p)] or code_paths
+    for path in runtime_paths:
+        lines = z.read(path).decode("utf-8", "replace").splitlines()[:120]
+        if not add(path, f"first {len(lines)} lines:\n" + "\n".join(lines)):
+            break
 
     return "".join(parts)
 
