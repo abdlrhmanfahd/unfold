@@ -24,17 +24,139 @@
 	function esc( s ) { return String( s == null ? '' : s ).replace( /[&<>"']/g, function ( c ) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ c ]; } ); }
 	function mb( n ) { return ( n / 1048576 ).toFixed( n > 104857600 ? 0 : 1 ) + ' MB'; }
 
+	function mountAi( host ) {
+		if ( ! host ) return null;
+		var aiCfg = C.ai || { presets: [], user: {}, defaults: {} };
+		var presets = aiCfg.presets || [], u = aiCfg.user || {}, defs = aiCfg.defaults || {};
+		var activeVal = 'quick';
+		if ( u.mode === 'preset' && presets.some( function ( p ) { return p.id === u.preset_id; } ) ) activeVal = 'preset:' + u.preset_id;
+		else if ( u.mode === 'byok' ) activeVal = 'byok';
+		else if ( presets.length && u.mode === 'preset' ) activeVal = 'preset:' + presets[ 0 ].id;
+
+		var radios = presets.map( function ( p ) {
+			return '<label class="uf-ai-opt"><input type="radio" name="uf_ai_mode" value="' + esc( 'preset:' + p.id ) + '"' + ( activeVal === 'preset:' + p.id ? ' checked' : '' ) + '>'
+				+ '<span><strong>' + esc( p.label ) + '</strong><small>' + esc( p.provider + ' · ' + p.model ) + '</small></span></label>';
+		} ).join( '' )
+		+ '<label class="uf-ai-opt"><input type="radio" name="uf_ai_mode" value="byok"' + ( activeVal === 'byok' ? ' checked' : '' ) + '>'
+			+ '<span><strong>Use my own API key (saved to my account)</strong><small>Gemini (free tier), Groq, OpenRouter, OpenAI, Ollama, or Anthropic — stored encrypted on your account.</small></span></label>'
+		+ '<label class="uf-ai-opt"><input type="radio" name="uf_ai_mode" value="quick"' + ( activeVal === 'quick' ? ' checked' : '' ) + '>'
+			+ '<span><strong>Quick Extract (No AI — instant)</strong><small>Extracts title, summary, code files, CSV columns, images &amp; videos right away without an API key.</small></span></label>';
+
+		var prov = u.provider || 'gemini';
+		host.innerHTML = '<p class="uf-ai-title">Extraction method</p>'
+			+ '<div class="uf-ai-modes">' + radios + '</div>'
+			+ '<div class="uf-ai-byok" data-uf-ai-byok' + ( activeVal === 'byok' ? '' : ' hidden' ) + '>'
+			+ '<div class="uf-field-row">'
+			+ '<label class="uf-field"><span>Provider</span><select data-uf-ai-provider>'
+				+ '<option value="gemini"' + ( prov === 'gemini' ? ' selected' : '' ) + '>Google Gemini (AI Studio Free / Paid)</option>'
+				+ '<option value="openai_compat"' + ( prov === 'openai_compat' ? ' selected' : '' ) + '>OpenAI-Compatible (Groq / OpenRouter / OpenAI)</option>'
+				+ '<option value="ollama"' + ( prov === 'ollama' ? ' selected' : '' ) + '>Ollama (Local Server)</option>'
+				+ '<option value="anthropic"' + ( prov === 'anthropic' ? ' selected' : '' ) + '>Anthropic (Claude)</option>'
+			+ '</select></label>'
+			+ '<label class="uf-field"><span>Model</span><input type="text" data-uf-ai-model value="' + esc( u.model || defs[ prov ] || '' ) + '"></label>'
+			+ '</div>'
+			+ '<label class="uf-field" data-uf-ai-url-row' + ( prov === 'openai_compat' || prov === 'ollama' ? '' : ' hidden' ) + '><span>Base URL</span><input type="url" data-uf-ai-url placeholder="https://api.groq.com/openai/v1" value="' + esc( u.base_url || '' ) + '"></label>'
+			+ '<label class="uf-field"><span>API Key</span><input type="password" autocomplete="new-password" data-uf-ai-key placeholder="' + esc( u.has_key ? 'Saved (…' + ( u.key_hint || '****' ) + ') — leave blank to keep' : 'Paste your API key' ) + '" value="">'
+			+ '<span class="uf-ai-status" data-uf-ai-status' + ( u.has_key ? '' : ' hidden' ) + '>Saved on your account (…' + esc( u.key_hint || '****' ) + ')</span></label>'
+			+ '<div class="uf-actions" style="margin-top:0!important">'
+			+ '<button type="button" class="uf-btn uf-btn--ghost" data-uf-ai-save>Save AI settings</button>'
+			+ '<button type="button" class="uf-btn uf-btn--ghost" data-uf-ai-clear' + ( u.has_key ? '' : ' hidden' ) + '>Clear saved key</button>'
+			+ '</div>'
+			+ '<p class="uf-ai-msg" data-uf-ai-msg aria-live="polite"></p>'
+			+ '</div>';
+
+		var byokBox = host.querySelector( '[data-uf-ai-byok]' ),
+			provEl = host.querySelector( '[data-uf-ai-provider]' ),
+			modelEl = host.querySelector( '[data-uf-ai-model]' ),
+			urlRow = host.querySelector( '[data-uf-ai-url-row]' ),
+			urlEl = host.querySelector( '[data-uf-ai-url]' ),
+			keyEl = host.querySelector( '[data-uf-ai-key]' ),
+			statusEl = host.querySelector( '[data-uf-ai-status]' ),
+			clearBtn = host.querySelector( '[data-uf-ai-clear]' ),
+			msgEl = host.querySelector( '[data-uf-ai-msg]' );
+		var lastProv = provEl.value;
+
+		function selected() {
+			var r = host.querySelector( 'input[name="uf_ai_mode"]:checked' );
+			return r ? r.value : 'quick';
+		}
+
+		function payload( includeKey ) {
+			var val = selected();
+			var mode = val.indexOf( 'preset:' ) === 0 ? 'preset' : val;
+			var out = {
+				mode: mode,
+				preset_id: val.indexOf( 'preset:' ) === 0 ? val.slice( 7 ) : '',
+				provider: provEl.value,
+				model: modelEl.value.trim(),
+				base_url: urlEl.value.trim(),
+			};
+			if ( includeKey !== false && keyEl.value.trim() ) out.api_key = keyEl.value.trim();
+			return out;
+		}
+
+		function applyUserState( next ) {
+			aiCfg.user = next;
+			keyEl.value = '';
+			keyEl.placeholder = next.has_key ? 'Saved (…' + ( next.key_hint || '****' ) + ') — leave blank to keep' : 'Paste your API key';
+			statusEl.hidden = ! next.has_key;
+			statusEl.textContent = next.has_key ? 'Saved on your account (…' + ( next.key_hint || '****' ) + ')' : '';
+			clearBtn.hidden = ! next.has_key;
+		}
+
+		host.querySelectorAll( 'input[name="uf_ai_mode"]' ).forEach( function ( r ) {
+			r.addEventListener( 'change', function () {
+				var v = selected();
+				byokBox.hidden = v !== 'byok';
+				api( 'PUT', '/me/ai', payload( false ) ).then( applyUserState ).catch( function () {} );
+			} );
+		} );
+
+		provEl.addEventListener( 'change', function () {
+			var next = provEl.value;
+			urlRow.hidden = next !== 'openai_compat' && next !== 'ollama';
+			if ( ! modelEl.value.trim() || modelEl.value.trim() === ( defs[ lastProv ] || '' ) ) modelEl.value = defs[ next ] || '';
+			if ( next === 'openai_compat' && ( ! urlEl.value.trim() || urlEl.value.indexOf( '11434' ) !== -1 ) ) urlEl.value = 'https://api.groq.com/openai/v1';
+			if ( next === 'ollama' && ( ! urlEl.value.trim() || urlEl.value.indexOf( 'groq.com' ) !== -1 ) ) urlEl.value = 'http://127.0.0.1:11434';
+			lastProv = next;
+		} );
+
+		host.querySelector( '[data-uf-ai-save]' ).addEventListener( 'click', function () {
+			msgEl.textContent = 'Saving…';
+			api( 'PUT', '/me/ai', payload( true ) ).then( function ( next ) {
+				applyUserState( next );
+				msgEl.textContent = 'Saved to your account.';
+			} ).catch( function ( e ) { msgEl.textContent = e.message; } );
+		} );
+
+		clearBtn.addEventListener( 'click', function () {
+			var body = payload( false );
+			body.clear_key = true;
+			msgEl.textContent = 'Clearing…';
+			api( 'PUT', '/me/ai', body ).then( function ( next ) {
+				applyUserState( next );
+				msgEl.textContent = 'Saved API key removed.';
+			} ).catch( function ( e ) { msgEl.textContent = e.message; } );
+		} );
+
+		return { payload: function () { return payload( true ); } };
+	}
+
 	/* ------------------------------------------------------------------
 	 * Upload (dashboard and "replace files")
 	 * ---------------------------------------------------------------- */
-	function upload( file, projectId, ui ) {
+	function upload( file, projectId, ui, getAi ) {
 		if ( ! /\.zip$/i.test( file.name ) ) return Promise.reject( new Error( 'Choose a .zip file.' ) );
 		if ( file.size > C.maxZip ) return Promise.reject( new Error( 'The ZIP must be smaller than 1 GB.' ) );
 		ui.start( file );
 		return api( 'POST', '/uploads', { name: file.name, size: file.size, project: projectId || 0 } ).then( function ( s ) {
 			var offset = 0, size = s.chunk_bytes, t0 = Date.now();
 			function next() {
-				if ( offset >= file.size ) return api( 'POST', '/uploads/' + s.upload_id + '/complete', { project: projectId || 0 } );
+				if ( offset >= file.size ) {
+					var doneBody = { project: projectId || 0 };
+					if ( getAi ) { var aiVal = getAi(); if ( aiVal ) doneBody.ai = aiVal; }
+					return api( 'POST', '/uploads/' + s.upload_id + '/complete', doneBody );
+				}
 				var blob = file.slice( offset, Math.min( file.size, offset + size ) );
 				return api( 'PUT', '/uploads/' + s.upload_id + '?offset=' + offset, blob, true ).then( function ( r ) {
 					offset = r.received;
@@ -73,8 +195,9 @@
 	var dash = document.getElementById( 'uf-upload' );
 	if ( dash ) {
 		var ui = uploadUI( dash );
+		var dashAi = mountAi( dash.querySelector( '[data-uf-ai]' ) );
 		bindDrop( dash.querySelector( '[data-uf-drop]' ), function ( f ) {
-			upload( f, 0, ui ).then( function ( p ) { location.href = C.workspace + ( C.workspace.indexOf( '?' ) === -1 ? '?' : '&' ) + 'project=' + p.id; } ).catch( ui.fail );
+			upload( f, 0, ui, function () { return dashAi ? dashAi.payload() : null; } ).then( function ( p ) { location.href = C.workspace + ( C.workspace.indexOf( '?' ) === -1 ? '?' : '&' ) + 'project=' + p.id; } ).catch( ui.fail );
 		} );
 	}
 
@@ -131,6 +254,7 @@
 			pollT = setTimeout( load, 5000 );
 		} else if ( s === 'failed' ) {
 			html += '<div class="uf-state-card uf-state-card--alert"><div><h2 class="uf-h3">The AI could not finish reading this project</h2><p class="uf-muted">' + esc( ( P.job && P.job.error ) || 'Unknown error.' ) + '</p>' + filesLine
+				+ '<div class="uf-ai-box" data-uf-ai></div>'
 				+ '<p class="uf-actions"><button class="uf-btn" data-uf-retry>Try again</button></p></div></div>';
 		} else if ( s === 'submitted' ) {
 			html += '<div class="uf-state-card"><div><h2 class="uf-h3">Submitted — waiting for your instructor</h2><p>You will see the decision here. The project cannot be edited while it is being reviewed.</p><p class="uf-actions"><a class="uf-btn uf-btn--ghost" href="' + previewUrl() + '">Preview the page</a></p></div></div>';
@@ -156,9 +280,10 @@
 		}
 		ws.innerHTML = html;
 
+		var retryAi = mountAi( ws.querySelector( '[data-uf-ai]' ) );
 		var retry = ws.querySelector( '[data-uf-retry]' );
 		if ( retry ) retry.addEventListener( 'click', function () {
-			api( 'POST', '/projects/' + C.project + '/extract', {} ).then( function ( p ) { P = p; render(); } ).catch( function ( e ) {
+			api( 'POST', '/projects/' + C.project + '/extract', { ai: retryAi ? retryAi.payload() : undefined } ).then( function ( p ) { P = p; render(); } ).catch( function ( e ) {
 				ws.innerHTML = '<div class="uf-alert uf-alert--error">' + esc( e.message ) + '</div>';
 			} );
 		} );

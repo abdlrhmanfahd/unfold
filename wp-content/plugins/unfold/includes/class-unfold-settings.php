@@ -83,6 +83,36 @@ class Unfold_Settings {
 						</td>
 					</tr>
 					<tr>
+						<th scope="row"><?php esc_html_e( 'Built-in AI Presets (Lab Models)', 'unfold' ); ?></th>
+						<td>
+							<p class="description" style="margin-bottom:10px"><?php esc_html_e( 'Optional ready-to-use AI models students can pick without entering their own key. API keys are encrypted at rest and never exposed in the browser.', 'unfold' ); ?></p>
+							<?php foreach ( Unfold_AI::raw_presets() as $pid => $p ) : ?>
+								<div style="border:1px solid #dcdcde;border-radius:6px;padding:10px 12px;margin-bottom:10px;max-width:620px;background:#fff">
+									<p style="margin-top:0"><label><input type="checkbox" name="unfold_ai_presets[<?php echo esc_attr( $pid ); ?>][enabled]" value="1" <?php checked( ! empty( $p['enabled'] ) ); ?>> <strong><?php echo esc_html( $pid ); ?></strong></label></p>
+									<p><label><?php esc_html_e( 'Display Label', 'unfold' ); ?><br>
+										<input type="text" class="regular-text" name="unfold_ai_presets[<?php echo esc_attr( $pid ); ?>][label]" value="<?php echo esc_attr( $p['label'] ); ?>"></label></p>
+									<p><label><?php esc_html_e( 'Provider', 'unfold' ); ?>
+										<select name="unfold_ai_presets[<?php echo esc_attr( $pid ); ?>][provider]">
+											<option value="gemini" <?php selected( $p['provider'], 'gemini' ); ?>>Gemini</option>
+											<option value="ollama" <?php selected( $p['provider'], 'ollama' ); ?>>Ollama (local)</option>
+											<option value="openai_compat" <?php selected( $p['provider'], 'openai_compat' ); ?>>OpenAI-Compatible (Groq / OpenRouter)</option>
+											<option value="anthropic" <?php selected( $p['provider'], 'anthropic' ); ?>>Anthropic (Claude)</option>
+										</select></label>
+										<label style="margin-left:12px"><?php esc_html_e( 'Model', 'unfold' ); ?>
+										<input type="text" class="regular-text" style="width:220px" name="unfold_ai_presets[<?php echo esc_attr( $pid ); ?>][model]" value="<?php echo esc_attr( $p['model'] ); ?>"></label></p>
+									<p><label><?php esc_html_e( 'Base URL (Ollama / OpenAI-compatible)', 'unfold' ); ?><br>
+										<input type="url" class="regular-text" name="unfold_ai_presets[<?php echo esc_attr( $pid ); ?>][base_url]" placeholder="https://api.groq.com/openai/v1" value="<?php echo esc_attr( $p['base_url'] ); ?>"></label></p>
+									<p style="margin-bottom:0"><label><?php esc_html_e( 'API Key', 'unfold' ); ?><br>
+										<input type="password" class="regular-text" name="unfold_ai_presets[<?php echo esc_attr( $pid ); ?>][api_key]" autocomplete="new-password" placeholder="<?php echo '' !== $p['api_key_enc'] ? esc_attr( sprintf( __( 'Saved (…%s) — leave blank to keep', 'unfold' ), $p['key_hint'] ?: '****' ) ) : esc_attr__( 'Optional for local Ollama', 'unfold' ); ?>" value=""></label>
+										<?php if ( '' !== $p['api_key_enc'] ) : ?>
+											<label style="margin-left:10px"><input type="checkbox" name="unfold_ai_presets[<?php echo esc_attr( $pid ); ?>][clear_key]" value="1"> <?php esc_html_e( 'Clear saved key', 'unfold' ); ?></label>
+										<?php endif; ?>
+									</p>
+								</div>
+							<?php endforeach; ?>
+						</td>
+					</tr>
+					<tr>
 						<th scope="row"><?php esc_html_e( 'AI extraction worker', 'unfold' ); ?></th>
 						<td><p><?php echo $hint ? esc_html( sprintf( __( 'A token ending in …%s is active.', 'unfold' ), $hint ) ) : esc_html__( 'No token yet: the worker cannot connect.', 'unfold' ); ?>
 							<?php $seen = (int) get_option( 'unfold_worker_seen', 0 ); echo ' ' . ( $seen && time() - $seen < 120 ? '<strong style="color:#067647">' . esc_html__( 'Worker is running.', 'unfold' ) . '</strong>' : esc_html( $seen ? sprintf( __( 'Worker last seen %s ago (not running).', 'unfold' ), human_time_diff( $seen ) ) : __( 'Worker has never connected.', 'unfold' ) ) ); ?></p>
@@ -151,6 +181,37 @@ class Unfold_Settings {
 		if ( ! defined( 'UNFOLD_SMTP_FROM' ) ) {
 			update_option( 'unfold_smtp_from', sanitize_email( wp_unslash( $_POST['unfold_smtp_from'] ?? '' ) ) );
 		}
+		$posted_presets = isset( $_POST['unfold_ai_presets'] ) && is_array( $_POST['unfold_ai_presets'] ) ? wp_unslash( $_POST['unfold_ai_presets'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+		$next_presets   = array();
+		foreach ( Unfold_AI::raw_presets() as $pid => $cur_p ) {
+			$in          = is_array( $posted_presets[ $pid ] ?? null ) ? $posted_presets[ $pid ] : array();
+			$provider    = sanitize_key( (string) ( $in['provider'] ?? $cur_p['provider'] ) );
+			if ( ! in_array( $provider, Unfold_AI::BYOK_PROVIDERS, true ) ) {
+				$provider = $cur_p['provider'];
+			}
+			$model       = sanitize_text_field( (string) ( $in['model'] ?? '' ) );
+			$api_key_enc = $cur_p['api_key_enc'];
+			$key_hint    = $cur_p['key_hint'];
+			if ( ! empty( $in['clear_key'] ) ) {
+				$api_key_enc = '';
+				$key_hint    = '';
+			} elseif ( isset( $in['api_key'] ) && is_string( $in['api_key'] ) && '' !== trim( $in['api_key'] ) ) {
+				$plain       = trim( $in['api_key'] );
+				$api_key_enc = Unfold_AI::encrypt_secret( $plain );
+				$key_hint    = Unfold_AI::key_hint( $plain );
+			}
+			$next_presets[ $pid ] = array(
+				'id'          => $pid,
+				'enabled'     => ! empty( $in['enabled'] ),
+				'label'       => sanitize_text_field( (string) ( $in['label'] ?? $cur_p['label'] ) ) ?: $cur_p['label'],
+				'provider'    => $provider,
+				'model'       => '' !== $model ? $model : ( Unfold_AI::DEFAULT_MODELS[ $provider ] ?? '' ),
+				'base_url'    => Unfold_AI::sanitize_base_url( $in['base_url'] ?? $cur_p['base_url'] ),
+				'api_key_enc' => $api_key_enc,
+				'key_hint'    => $key_hint,
+			);
+		}
+		Unfold_AI::save_presets( $next_presets );
 		if ( ! empty( $_POST['unfold_rotate_token'] ) ) {
 			set_transient( 'unfold_new_token_' . get_current_user_id(), self::rotate_worker_token(), 300 );
 		}

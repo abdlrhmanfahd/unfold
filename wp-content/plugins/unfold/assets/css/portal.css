@@ -248,3 +248,15 @@
 .uf-spark { color: #0F9E8A; }
 .uf-ptabs a[aria-current="page"] { border-bottom-color: var(--uf-accent); }
 .uf-state { border-radius: 4px; }
+
+/* Extraction method selector (Presets / BYOK / Quick Extract) */
+.uf-ai-box { border: 1px solid var(--uf-line); border-radius: 12px; padding: var(--uf-s4); margin-top: var(--uf-s4); background: var(--uf-soft); }
+.uf-ai-title { font-weight: 700; font-size: .95rem; margin: 0 0 var(--uf-s2) !important; }
+.uf-ai-modes { display: grid; gap: 8px; }
+.uf-ai-opt { display: flex; align-items: flex-start; gap: 10px; background: #fff; border: 1px solid var(--uf-line); border-radius: 10px; padding: 10px 12px; cursor: pointer; font-size: .94rem; }
+.uf-ai-opt:has(input:checked) { border-color: var(--uf-accent); box-shadow: 0 0 0 2px rgba(11, 138, 122, .12); }
+.uf-ai-opt input { width: 17px; height: 17px; margin-top: 3px; accent-color: var(--uf-accent); flex: none; }
+.uf-ai-opt small { display: block; color: var(--uf-muted); font-size: .82rem; margin-top: 2px; }
+.uf-ai-byok { margin-top: var(--uf-s3); padding: var(--uf-s3); background: #fff; border: 1px solid var(--uf-line); border-radius: 10px; display: grid; gap: var(--uf-s3); }
+.uf-ai-status { display: inline-block; font-size: .82rem; font-weight: 600; color: #067647; background: #ecfdf3; border: 1px solid #abefc6; border-radius: 6px; padding: 3px 8px; margin-top: 4px; }
+.uf-ai-msg { font-size: .86rem; color: var(--uf-ink-2); margin: 0 !important; min-height: 1.1em; }

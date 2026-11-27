@@ -151,6 +151,11 @@ class Unfold_Portals {
 			'workspace' => self::url( 'workspace' ),
 			'schema'    => Unfold_Validator::schema(),
 			'maxZip'    => Unfold_Workflow::MAX_ZIP_BYTES,
+			'ai'        => array(
+				'presets'  => Unfold_AI::public_presets(),
+				'user'     => Unfold_AI::get_user_config( get_current_user_id() ),
+				'defaults' => Unfold_AI::DEFAULT_MODELS,
+			),
 		);
 
 		$project = absint( $_GET['project'] ?? 0 ); // phpcs:ignore WordPress.Security.NonceVerification
@@ -203,6 +208,7 @@ class Unfold_Portals {
 		$body = '<section class="uf-upload" id="uf-upload" aria-labelledby="uf-upload-h">'
 			. '<h2 id="uf-upload-h" class="uf-h2">' . esc_html__( 'Upload a project', 'unfold' ) . '</h2>'
 			. '<p class="uf-muted">' . esc_html__( 'Put the report (PDF or Word), code, data logs (CSV), figures and videos into one ZIP file. Unfold reads the report, breaks the project into parts and fills in a form for you to check.', 'unfold' ) . '</p>'
+			. '<div class="uf-ai-box" data-uf-ai></div>'
 			. '<label class="uf-drop" data-uf-drop><input type="file" accept=".zip,application/zip" class="screen-reader-text">'
 			. '<span class="uf-drop-icon" aria-hidden="true">⤒</span><strong>' . esc_html__( 'Drop the project ZIP here', 'unfold' ) . '</strong><span>' . esc_html__( 'or click to choose a file · up to 1 GB', 'unfold' ) . '</span></label>'
 			. '<div class="uf-progress" data-uf-progress hidden><div class="uf-progress-bar"><span></span></div><p data-uf-progress-text></p></div>'
