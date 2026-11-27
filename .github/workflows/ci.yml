@@ -60,10 +60,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install Python worker dependencies
-        run: python -m pip install requests pypdf
+        run: python -m pip install -r workers/extractor/requirements.txt -r workers/world/requirements.txt
 
       - name: Compile-check Python workers
-        run: python -m py_compile workers/extractor/unfold_worker.py
+        run: python -m py_compile workers/extractor/unfold_worker.py workers/world/*.py
 
       - name: Run Python unit tests
         run: python -m unittest discover -s tests/python -v

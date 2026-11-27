@@ -735,7 +735,11 @@ class Unfold_Worlds {
 	 * when it finishes, worker_result() starts the next one.
 	 */
 	public static function launch() {
-		if ( ! defined( 'UNFOLD_WORLD_PYTHON' ) || ! defined( 'UNFOLD_WORLD_WORKER' ) || ! function_exists( 'popen' ) ) {
+		$is_win = ( 'Windows' === PHP_OS_FAMILY );
+		if ( ! defined( 'UNFOLD_WORLD_PYTHON' ) || ! defined( 'UNFOLD_WORLD_WORKER' ) ) {
+			return false;
+		}
+		if ( $is_win ? ! function_exists( 'popen' ) : ! function_exists( 'exec' ) ) {
 			return false;
 		}
 		// When PHP may only read inside the site (open_basedir, as on WordPress Studio), it cannot
@@ -758,13 +762,15 @@ class Unfold_Worlds {
 		$dir  = self::drive_dir( $job['drive_id'] );
 		$file = $dir . '/job.json';
 		file_put_contents( $file, wp_json_encode( $job ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions
-		$q   = static function ( $a ) {
-			return '"' . str_replace( '"', '', $a ) . '"';
-		};
-		$cmd = $q( UNFOLD_WORLD_PYTHON ) . ' -u ' . $q( UNFOLD_WORLD_WORKER ) . ' --job ' . $q( $file ) . ' > ' . $q( $dir . '/worker.log' ) . ' 2>&1';
-		if ( 'Windows' === PHP_OS_FAMILY ) {
-			pclose( popen( 'start "" /B ' . $cmd, 'r' ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		update_option( 'unfold_world_worker_seen', time(), false );
+		if ( $is_win ) {
+			$q   = static function ( $a ) {
+				return '"' . str_replace( array( '"', '&', '|', '<', '>', '^', '%' ), '', (string) $a ) . '"';
+			};
+			$cmd = $q( UNFOLD_WORLD_PYTHON ) . ' -u ' . $q( UNFOLD_WORLD_WORKER ) . ' --job ' . $q( $file ) . ' > ' . $q( $dir . '/worker.log' ) . ' 2>&1';
+			pclose( popen( 'start "" /B cmd /C "' . $cmd . '"', 'r' ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 		} else {
+			$cmd = escapeshellarg( UNFOLD_WORLD_PYTHON ) . ' -u ' . escapeshellarg( UNFOLD_WORLD_WORKER ) . ' --job ' . escapeshellarg( $file ) . ' > ' . escapeshellarg( $dir . '/worker.log' ) . ' 2>&1';
 			exec( 'nohup ' . $cmd . ' &' ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
 		}
 		return true;
@@ -796,6 +802,7 @@ class Unfold_Worlds {
 		if ( ! self::job_ok( $id, (string) ( $b['job_id'] ?? '' ) ) ) {
 			return new WP_Error( 'unfold_job', 'Job not active.', array( 'status' => 409 ) );
 		}
+		update_option( 'unfold_world_worker_seen', time(), false );
 		update_post_meta( $id, '_unfold_progress', array( 'pct' => max( 0, min( 100, (int) ( $b['pct'] ?? 0 ) ) ), 'stage' => sanitize_text_field( (string) ( $b['stage'] ?? '' ) ), 'at' => time() ) );
 		return array( 'ok' => true );
 	}
@@ -806,6 +813,7 @@ class Unfold_Worlds {
 		if ( ! self::job_ok( $id, (string) ( $b['job_id'] ?? '' ) ) ) {
 			return new WP_Error( 'unfold_job', 'Job not active.', array( 'status' => 409 ) );
 		}
+		update_option( 'unfold_world_worker_seen', time(), false );
 		if ( ! empty( $b['error'] ) ) {
 			update_post_meta( $id, '_unfold_state', 'failed' );
 			update_post_meta( $id, '_unfold_error', sanitize_text_field( mb_substr( (string) $b['error'], 0, 500 ) ) );
