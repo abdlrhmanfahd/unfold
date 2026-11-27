@@ -436,14 +436,17 @@
 			} );
 	}
 
-	fetch( C.rest + '/worlds/' + C.world + '/view', { credentials: 'same-origin', headers: { 'X-WP-Nonce': C.nonce } } ).then( r => r.json() ).then( w => {
+	fetch( C.rest + '/worlds/' + C.world + '/view', { credentials: 'same-origin', headers: { 'X-WP-Nonce': C.nonce } } ).then( r => {
+		if ( ! r.ok ) throw new Error( 'HTTP ' + r.status );
+		return r.json();
+	} ).then( w => {
 		drives = ( w.drives || [] ).filter( d => d.state === 'ready' );
 		if ( ! drives.length ) { say( 'No recording of this world is ready yet.' ); return; }
 		say( 'Loading the 3D map…' );
 		return Promise.all( drives.map( loadDrive ) ).then( () => {
 			// Recordings play in the order they were recorded on the car, not the order they were uploaded.
 			drives.sort( ( a, b ) => ( a.meta.t0_epoch || 0 ) - ( b.meta.t0_epoch || 0 ) );
-			const maxN = Math.max( 1, ...drives.map( d => d.scans ? Math.max( ...d.scans.n ) : 1 ) );
+			const maxN = Math.max( 1, ...drives.map( d => ( d.scans && Array.isArray( d.scans.n ) ) ? d.scans.n.reduce( ( m, v ) => ( v > m ? v : m ), 1 ) : 1 ) );
 			const g = new THREE.BufferGeometry(); g.setAttribute( 'position', new THREE.BufferAttribute( new Float32Array( 3 * maxN ), 3 ) ); g.setDrawRange( 0, 0 );
 			scanObj = new THREE.Points( g, new THREE.PointsMaterial( { color: 0x5EEAD4, size: ( narrow() ? 2.4 : 3 ) * Math.min( window.devicePixelRatio || 1, 2 ), sizeAttenuation: false, transparent: true, opacity: 0.95, depthWrite: false } ) );
 			scanObj.matrixAutoUpdate = false; scanObj.frustumCulled = false; scene.add( scanObj );

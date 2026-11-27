@@ -160,10 +160,10 @@ class Unfold_Portals {
 			if ( ! empty( $_GET['preview'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification
 				$data = Unfold_Store::get( $project );
 				wp_enqueue_style( 'unfold' );
-				wp_enqueue_script( 'unfold-project' );
 				if ( $data && Unfold_Render::csv_sources( $project, $data ) ) {
 					wp_enqueue_script( 'unfold-plotly' );
 				}
+				wp_enqueue_script( 'unfold-project' );
 				$body = '<p class="uf-back"><a href="' . esc_url( self::url( 'workspace', array( 'project' => $project ) ) ) . '">← ' . esc_html__( 'Back to editing', 'unfold' ) . '</a></p>'
 					. '<p class="uf-preview-label">' . esc_html__( 'Preview — how visitors will see the project once it is accepted', 'unfold' ) . '</p>'
 					. ( $data ? Unfold_Render::project_html( $project, $data, true ) : '<div class="uf-alert uf-alert--error">' . esc_html__( 'There is nothing valid to preview yet. Fix the problems listed in the form first.', 'unfold' ) . '</div>' );
@@ -354,10 +354,10 @@ class Unfold_Portals {
 
 		wp_enqueue_style( 'unfold' );
 		wp_enqueue_style( 'unfold-katex' );
-		wp_enqueue_script( 'unfold-project' );
 		if ( $data && Unfold_Render::csv_sources( $id, $data ) ) {
 			wp_enqueue_script( 'unfold-plotly' );
 		}
+		wp_enqueue_script( 'unfold-project' );
 
 		$submitted = null;
 		foreach ( array_reverse( Unfold_Workflow::events( $id ) ) as $e ) {

@@ -1,7 +1,7 @@
 /** Unfold admin: instant JSON syntax check, Format button, sample loader. */
 ( function () {
 	'use strict';
-	var ta = document.getElementById( 'unfold-json' );
+	var ta = document.querySelector( 'textarea#unfold-json' );
 	if ( ! ta ) return;
 	var live = document.querySelector( '[data-unfold-live]' );
 	var file = document.querySelector( 'input[name="unfold_json_file"]' );
@@ -54,8 +54,15 @@
 			return;
 		}
 		fetch( sample.getAttribute( 'data-url' ), { credentials: 'same-origin' } )
-			.then( function ( r ) { return r.text(); } )
-			.then( function ( txt ) { ta.value = txt; check(); } );
+			.then( function ( r ) {
+				if ( ! r.ok ) throw new Error( 'HTTP ' + r.status );
+				return r.text();
+			} )
+			.then( function ( txt ) { ta.value = txt; check(); } )
+			.catch( function ( err ) {
+				live.textContent = 'Could not load sample project: ' + err.message;
+				live.className = 'unfold-live is-error';
+			} );
 	} );
 
 	// Reading an uploaded file into the box lets the editor see it before saving.

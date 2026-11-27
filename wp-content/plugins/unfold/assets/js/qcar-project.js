@@ -207,6 +207,12 @@
 		const btn = box.querySelector( '.ufp-details-btn' ), body = box.querySelector( '.uf-p2-inner' );
 		const set = open => { box.classList.toggle( 'is-folded', ! open ); btn.setAttribute( 'aria-expanded', open ? 'true' : 'false' ); body.inert = ! open; };
 		btn.addEventListener( 'click', () => set( box.classList.contains( 'is-folded' ) ) );
-		if ( location.hash && location.hash !== '#uf-details' && body.querySelector( location.hash ) ) set( true );
+		if ( location.hash && location.hash !== '#uf-details' ) {
+			try {
+				const id = decodeURIComponent( location.hash.slice( 1 ) );
+				const target = id ? document.getElementById( id ) : null;
+				if ( target && body.contains( target ) ) set( true );
+			} catch ( e ) {}
+		}
 	} );
 } )();
