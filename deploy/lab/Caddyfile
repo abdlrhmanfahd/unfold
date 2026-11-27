@@ -1,0 +1,19 @@
+# Caddy reverse proxy for hosting Unfold on a computer lab LAN.
+# Usage: caddy run --config deploy/lab/Caddyfile
+# Replace :80 with your lab domain or static LAN IP if using HTTPS.
+:80 {
+	# Block direct HTTP access to private ZIPs, worker logs, and raw drive outputs.
+	@private path /wp-content/unfold-private/*
+	respond @private 403
+
+	# Block public WordPress user enumeration endpoint.
+	@wp_users path /wp-json/wp/v2/users*
+	respond @wp_users 403
+
+	# Forward all other traffic to local WordPress Studio / PHP server.
+	reverse_proxy 127.0.0.1:8881 {
+		header_up Host {http.request.host}
+		header_up X-Real-IP {http.request.remote.host}
+		header_up X-Forwarded-Proto {http.request.scheme}
+	}
+}
