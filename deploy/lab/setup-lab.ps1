@@ -7,7 +7,7 @@
     4. Registers Windows Scheduled Tasks so Ollama & both workers start automatically on boot/logon.
 #>
 param(
-    [string]$Model = 'qwen2.5:7b',
+    [string]$Model = 'qwen3:14b',
     [string]$SiteUrl = 'http://localhost:8881',
     [switch]$SkipOllama,
     [switch]$SkipTasks,

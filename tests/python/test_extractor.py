@@ -365,6 +365,50 @@ class ExtractorWorkerTests(unittest.TestCase):
             sent_user = post.call_args.kwargs["json"]["messages"][1]["content"]
             self.assertIn("END_CONTEXT_MARKER", sent_user)
 
+    def test_parse_json_strips_think_tags(self):
+        raw = '<think>First check the sensor rates and subsystems.\nThen emit JSON.</think>\n{"schema_version": "0.2", "ok": true}'
+        parsed = uw.parse_json(raw)
+        self.assertEqual(parsed["schema_version"], "0.2")
+        self.assertTrue(parsed["ok"])
+
+    def test_ollama_thinking_model_enables_think_and_full_schema(self):
+        schema_path = os.path.abspath("wp-content/plugins/unfold/schema/project.schema.json")
+        with open(schema_path, encoding="utf-8") as fh:
+            schema = json.load(fh)
+
+        raw_zip, files = make_sample_zip()
+        files[0]["path"] = "report.pdf"
+        buf = io.BytesIO(raw_zip)
+        with zipfile.ZipFile(buf, "a") as z:
+            z.writestr("report.pdf", b"%PDF-1.4\nstream\nBT\n(Autonomous Fleet Control)\nET\nendstream\n%%EOF")
+
+        fake_resp = mock.Mock()
+        fake_resp.status_code = 200
+        fake_resp.iter_lines.return_value = [
+            json.dumps({"message": {"thinking": "Analyzing subsystems carefully..."}, "done": False}),
+            json.dumps({"message": {"content": '{"schema_version": "0.2", "meta": {"title": "Fleet"}}'}, "done": True, "prompt_eval_count": 200, "eval_count": 40}),
+        ]
+
+        with mock.patch.object(uw.requests, "post", return_value=fake_resp) as post:
+            qwen3 = uw.LLMClient("ollama", model="qwen3:14b")
+            qwen3.ask_json("sys", [{"type": "text", "text": "hello"}])
+            q3_payload = post.call_args.kwargs["json"]
+            self.assertTrue(q3_payload.get("think"))
+            self.assertGreaterEqual(q3_payload["options"]["num_ctx"], 16384)
+            self.assertGreaterEqual(q3_payload["options"]["num_predict"], 8192)
+
+            post.reset_mock()
+            qwen2 = uw.LLMClient("ollama", model="qwen2.5:3b")
+            qwen2.ask_json("sys", [{"type": "text", "text": "hello"}])
+            q2_payload = post.call_args.kwargs["json"]
+            self.assertNotIn("think", q2_payload)
+
+            with mock.patch.object(uw.LLMClient, "ask_json", return_value=({"schema_version": "0.2"}, {"model": "qwen3:14b", "usage": {"input_tokens": 1, "output_tokens": 1, "cache_read_input_tokens": 0}})) as ask_mock:
+                uw.extract_project(qwen3, buf.getvalue(), files, "report.pdf", schema)
+                self.assertIn('"properties"', ask_mock.call_args.args[0])
+                uw.extract_project(qwen2, buf.getvalue(), files, "report.pdf", schema)
+                self.assertIn("NEVER invent filenames", ask_mock.call_args.args[0])
+
 
 if __name__ == "__main__":
     unittest.main()
