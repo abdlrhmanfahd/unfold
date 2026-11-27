@@ -1,0 +1,15 @@
+.unfold-admin .unfold-json { width: 100%; font-family: Consolas, Monaco, monospace; font-size: 13px; line-height: 1.5; tab-size: 2; }
+.unfold-status { border-left: 4px solid #c3c4c7; background: #f6f7f7; padding: 10px 14px; margin: 6px 0 10px; }
+.unfold-status--ok { border-color: #00a32a; background: #edfaef; }
+.unfold-status--error { border-color: #d63638; background: #fcf0f1; }
+.unfold-errors { margin: 8px 0 8px 1.4em; }
+.unfold-errors li { margin: 4px 0; }
+.unfold-errors code { background: #fff; font-weight: 600; }
+.unfold-live { min-height: 1.4em; margin: 4px 0; font-weight: 600; }
+.unfold-live.is-ok { color: #007017; }
+.unfold-live.is-error { color: #b32d2e; }
+.unfold-tools { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 8px 0; }
+.unfold-upload { margin-right: auto; }
+.unfold-pill { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px; background: #f0f0f1; color: #50575e; }
+.unfold-pill--ok { background: #edfaef; color: #007017; }
+.unfold-pill--error { background: #fcf0f1; color: #b32d2e; }

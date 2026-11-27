@@ -1,0 +1,329 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/theme.json",
+	"version": 3,
+	"settings": {
+		"appearanceTools": true,
+		"useRootPaddingAwareAlignments": true,
+		"layout": {
+			"contentSize": "760px",
+			"wideSize": "1160px"
+		},
+		"color": {
+			"defaultPalette": false,
+			"defaultGradients": false,
+			"palette": [
+				{
+					"slug": "base",
+					"name": "White",
+					"color": "#FFFFFF"
+				},
+				{
+					"slug": "panel",
+					"name": "Panel",
+					"color": "#F5F7F9"
+				},
+				{
+					"slug": "line",
+					"name": "Line",
+					"color": "#DCE2E8"
+				},
+				{
+					"slug": "line-2",
+					"name": "Strong line",
+					"color": "#C5CED8"
+				},
+				{
+					"slug": "dim",
+					"name": "Dim text",
+					"color": "#566270"
+				},
+				{
+					"slug": "ink",
+					"name": "Ink",
+					"color": "#0F1720"
+				},
+				{
+					"slug": "signal",
+					"name": "Signal",
+					"color": "#0B8A7A"
+				},
+				{
+					"slug": "signal-fill",
+					"name": "Signal fill",
+					"color": "#12B39C"
+				},
+				{
+					"slug": "signal-soft",
+					"name": "Signal tint",
+					"color": "#E3F5F1"
+				}
+			]
+		},
+		"spacing": {
+			"units": [
+				"px",
+				"rem",
+				"%",
+				"vw"
+			],
+			"spacingSizes": [
+				{
+					"slug": "20",
+					"name": "XS",
+					"size": "8px"
+				},
+				{
+					"slug": "30",
+					"name": "S",
+					"size": "16px"
+				},
+				{
+					"slug": "40",
+					"name": "M",
+					"size": "24px"
+				},
+				{
+					"slug": "50",
+					"name": "L",
+					"size": "clamp(24px, 4vw, 40px)"
+				},
+				{
+					"slug": "60",
+					"name": "XL",
+					"size": "clamp(40px, 6vw, 64px)"
+				},
+				{
+					"slug": "70",
+					"name": "XXL",
+					"size": "clamp(56px, 9vw, 112px)"
+				}
+			]
+		},
+		"typography": {
+			"fluid": true,
+			"defaultFontSizes": false,
+			"fontFamilies": [
+				{
+					"slug": "sans",
+					"name": "Onest",
+					"fontFamily": "Onest, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+					"fontFace": [
+						{
+							"fontFamily": "Onest",
+							"fontStyle": "normal",
+							"fontWeight": "400",
+							"fontDisplay": "swap",
+							"src": [
+								"file:./assets/fonts/onest-latin-400-normal.woff2"
+							]
+						},
+						{
+							"fontFamily": "Onest",
+							"fontStyle": "normal",
+							"fontWeight": "500",
+							"fontDisplay": "swap",
+							"src": [
+								"file:./assets/fonts/onest-latin-500-normal.woff2"
+							]
+						},
+						{
+							"fontFamily": "Onest",
+							"fontStyle": "normal",
+							"fontWeight": "600",
+							"fontDisplay": "swap",
+							"src": [
+								"file:./assets/fonts/onest-latin-600-normal.woff2"
+							]
+						},
+						{
+							"fontFamily": "Onest",
+							"fontStyle": "normal",
+							"fontWeight": "700",
+							"fontDisplay": "swap",
+							"src": [
+								"file:./assets/fonts/onest-latin-700-normal.woff2"
+							]
+						}
+					]
+				}
+			],
+			"fontSizes": [
+				{
+					"slug": "small",
+					"name": "Small",
+					"size": "0.875rem"
+				},
+				{
+					"slug": "medium",
+					"name": "Medium",
+					"size": "1rem"
+				},
+				{
+					"slug": "large",
+					"name": "Large",
+					"size": "1.2rem",
+					"fluid": {
+						"min": "1.1rem",
+						"max": "1.25rem"
+					}
+				},
+				{
+					"slug": "x-large",
+					"name": "Extra large",
+					"size": "2rem",
+					"fluid": {
+						"min": "1.6rem",
+						"max": "2.25rem"
+					}
+				},
+				{
+					"slug": "xx-large",
+					"name": "Huge",
+					"size": "3.5rem",
+					"fluid": {
+						"min": "2.4rem",
+						"max": "4rem"
+					}
+				}
+			]
+		}
+	},
+	"styles": {
+		"color": {
+			"background": "var(--wp--preset--color--base)",
+			"text": "var(--wp--preset--color--ink)"
+		},
+		"spacing": {
+			"blockGap": "var(--wp--preset--spacing--30)",
+			"padding": {
+				"left": "clamp(16px, 4vw, 40px)",
+				"right": "clamp(16px, 4vw, 40px)",
+				"top": "0",
+				"bottom": "0"
+			}
+		},
+		"typography": {
+			"fontFamily": "var(--wp--preset--font-family--sans)",
+			"fontSize": "var(--wp--preset--font-size--medium)",
+			"lineHeight": "1.6"
+		},
+		"elements": {
+			"link": {
+				"color": {
+					"text": "var(--wp--preset--color--signal)"
+				},
+				"typography": {
+					"textDecoration": "underline"
+				},
+				":hover": {
+					"color": {
+						"text": "var(--wp--preset--color--ink)"
+					}
+				}
+			},
+			"heading": {
+				"typography": {
+					"fontFamily": "var(--wp--preset--font-family--sans)",
+					"fontWeight": "600",
+					"lineHeight": "1.08",
+					"letterSpacing": "-0.03em"
+				},
+				"color": {
+					"text": "var(--wp--preset--color--ink)"
+				}
+			},
+			"h1": {
+				"typography": {
+					"fontSize": "var(--wp--preset--font-size--xx-large)",
+					"lineHeight": "1.03",
+					"letterSpacing": "-0.035em"
+				}
+			},
+			"h2": {
+				"typography": {
+					"fontSize": "clamp(1.8rem, 1.4rem + 1.4vw, 2.3rem)",
+					"letterSpacing": "-0.025em"
+				}
+			},
+			"button": {
+				"color": {
+					"background": "var(--wp--preset--color--ink)",
+					"text": "#FFFFFF"
+				},
+				"border": {
+					"radius": "6px"
+				},
+				"typography": {
+					"fontFamily": "var(--wp--preset--font-family--sans)",
+					"fontWeight": "600",
+					"fontSize": "0.95rem"
+				},
+				"spacing": {
+					"padding": {
+						"top": "0.7em",
+						"bottom": "0.7em",
+						"left": "1.15em",
+						"right": "1.15em"
+					}
+				},
+				":hover": {
+					"color": {
+						"background": "var(--wp--preset--color--signal)",
+						"text": "#FFFFFF"
+					}
+				}
+			}
+		},
+		"blocks": {
+			"core/site-title": {
+				"typography": {
+					"fontFamily": "var(--wp--preset--font-family--sans)",
+					"fontWeight": "600",
+					"fontSize": "1.25rem",
+					"letterSpacing": "-0.01em"
+				},
+				"elements": {
+					"link": {
+						"color": {
+							"text": "var(--wp--preset--color--ink)"
+						}
+					}
+				}
+			},
+			"core/navigation": {
+				"typography": {
+					"fontSize": "0.95rem",
+					"fontWeight": "500"
+				},
+				"elements": {
+					"link": {
+						"color": {
+							"text": "var(--wp--preset--color--dim)"
+						}
+					}
+				}
+			}
+		}
+	},
+	"templateParts": [
+		{
+			"name": "header",
+			"title": "Header",
+			"area": "header"
+		},
+		{
+			"name": "footer",
+			"title": "Footer",
+			"area": "footer"
+		}
+	],
+	"customTemplates": [
+		{
+			"name": "portal",
+			"title": "Portal (full width, no title)",
+			"postTypes": [
+				"page"
+			]
+		}
+	]
+}

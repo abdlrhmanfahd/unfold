@@ -1,0 +1,792 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unfold.local/schema/project/0.1",
+  "title": "Unfold project",
+  "description": "JSON Schema for one Unfold project. Converted from ee490-project-schema.yaml (draft v0.1). Anything the report does not state is null; values are never guessed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "meta",
+    "goal",
+    "environment",
+    "sensors",
+    "subsystems",
+    "connections",
+    "data_files",
+    "results",
+    "review"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": [
+        "0.1",
+        "0.2"
+      ]
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "short_description",
+        "platform",
+        "keywords"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "credit": {
+          "$ref": "#/$defs/text",
+          "description": "Name shown on the project: a person or a group, as the owner chooses. Filled by the owner, never extracted."
+        },
+        "short_description": {
+          "$ref": "#/$defs/text"
+        },
+        "question": {
+          "$ref": "#/$defs/text",
+          "description": "The project's question in one short line, shown first on the project page (e.g. 'Can software fix bent wheels?')."
+        },
+        "headline": {
+          "description": "The one result shown under the question, chosen by the owner. null = none.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "before",
+            "after",
+            "unit"
+          ],
+          "properties": {
+            "label": {
+              "$ref": "#/$defs/text"
+            },
+            "before": {
+              "$ref": "#/$defs/tracked_number"
+            },
+            "after": {
+              "$ref": "#/$defs/tracked_number"
+            },
+            "unit": {
+              "$ref": "#/$defs/text"
+            }
+          }
+        },
+        "platform": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "vehicle_count",
+            "software_stack"
+          ],
+          "properties": {
+            "mode": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "qlabs_sim",
+                "physical_qcar2",
+                "both",
+                null
+              ]
+            },
+            "vehicle_count": {
+              "$ref": "#/$defs/tracked_integer"
+            },
+            "software_stack": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "python",
+                  "matlab_simulink",
+                  "ros2",
+                  "other"
+                ]
+              }
+            }
+          }
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "goal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "problem_statement",
+        "objectives",
+        "success_criteria"
+      ],
+      "properties": {
+        "problem_statement": {
+          "$ref": "#/$defs/text"
+        },
+        "objectives": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "success_criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "metric",
+              "target",
+              "unit"
+            ],
+            "properties": {
+              "metric": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "$ref": "#/$defs/tracked_number"
+              },
+              "unit": {
+                "$ref": "#/$defs/text"
+              }
+            }
+          }
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario",
+        "map_source",
+        "map_file",
+        "obstacles",
+        "other_agents"
+      ],
+      "properties": {
+        "scenario": {
+          "$ref": "#/$defs/text"
+        },
+        "map_source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "qlabs_builtin",
+            "custom",
+            "physical_track",
+            "other",
+            null
+          ]
+        },
+        "map_file": {
+          "$ref": "#/$defs/text"
+        },
+        "obstacles": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "static",
+            "dynamic",
+            "both",
+            "none",
+            null
+          ]
+        },
+        "other_agents": {
+          "$ref": "#/$defs/text"
+        }
+      }
+    },
+    "sensors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "purpose",
+          "rate_hz",
+          "used_by"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "lidar",
+              "rgb_camera",
+              "depth_camera",
+              "imu",
+              "wheel_encoder",
+              "other"
+            ]
+          },
+          "purpose": {
+            "$ref": "#/$defs/text"
+          },
+          "rate_hz": {
+            "$ref": "#/$defs/tracked_number"
+          },
+          "used_by": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/slug"
+            }
+          }
+        }
+      }
+    },
+    "subsystems": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "category",
+          "description",
+          "inputs",
+          "outputs",
+          "method",
+          "equations",
+          "parameters",
+          "rate_hz",
+          "code_files",
+          "sim"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/slug"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "plain": {
+            "$ref": "#/$defs/text",
+            "description": "What the part does, in one short line (under 10 words)."
+          },
+          "on": {
+            "type": "array",
+            "description": "QCar 2 hardware this part runs on or drives.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "chassis",
+                "wheels",
+                "servo",
+                "motor",
+                "encoder",
+                "battery",
+                "board",
+                "imu",
+                "compute",
+                "lidar",
+                "depth",
+                "csi",
+                "lights",
+                "wifi"
+              ]
+            }
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "perception",
+              "localization",
+              "planning",
+              "control",
+              "task_allocation",
+              "fleet_coordination",
+              "communication",
+              "other"
+            ]
+          },
+          "description": {
+            "$ref": "#/$defs/text"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "unit": {
+                  "$ref": "#/$defs/text"
+                },
+                "from": {
+                  "$ref": "#/$defs/text"
+                }
+              }
+            }
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "unit": {
+                  "$ref": "#/$defs/text"
+                },
+                "to": {
+                  "$ref": "#/$defs/text"
+                }
+              }
+            }
+          },
+          "method": {
+            "$ref": "#/$defs/text"
+          },
+          "equations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "value",
+                "status"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "value": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "unit": {
+                  "$ref": "#/$defs/text"
+                },
+                "source_ref": {
+                  "$ref": "#/$defs/text"
+                },
+                "status": {
+                  "$ref": "#/$defs/status"
+                }
+              }
+            }
+          },
+          "rate_hz": {
+            "$ref": "#/$defs/tracked_number"
+          },
+          "code_files": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "sim": {
+            "description": "Simulation template for this part, reviewed by the owner. null = no simulation.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "student_approved"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "conceptual",
+                  "data_backed"
+                ]
+              },
+              "student_approved": {
+                "type": "boolean"
+              },
+              "template": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "path_follow",
+                  "speed_loop",
+                  null
+                ],
+                "description": "Unfold simulation template that models this part. null = none fits."
+              },
+              "inputs": {
+                "type": "array",
+                "description": "Values for the template's inputs, each traced to the report, a config file or a fit.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "value"
+                  ],
+                  "properties": {
+                    "name": {
+                      "$ref": "#/$defs/slug"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/tracked_number"
+                    }
+                  }
+                }
+              },
+              "data": {
+                "type": "array",
+                "description": "Recorded data from the ZIP that drives or is overlaid on the simulation.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "role",
+                    "file",
+                    "columns"
+                  ],
+                  "properties": {
+                    "role": {
+                      "type": "string",
+                      "enum": [
+                        "route",
+                        "speed",
+                        "run"
+                      ]
+                    },
+                    "label": {
+                      "$ref": "#/$defs/text"
+                    },
+                    "file": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "columns": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "set": {
+                      "type": "array",
+                      "description": "Template inputs this recorded run used, e.g. bhat = 0 for the run without the fix.",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "name",
+                          "value"
+                        ],
+                        "properties": {
+                          "name": {
+                            "$ref": "#/$defs/slug"
+                          },
+                          "value": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "connections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "$ref": "#/$defs/slug"
+          },
+          "to": {
+            "$ref": "#/$defs/slug"
+          },
+          "signal": {
+            "$ref": "#/$defs/text"
+          }
+        }
+      }
+    },
+    "data_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "file",
+          "format"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "$ref": "#/$defs/text"
+          },
+          "subsystem": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "csv",
+              "mat",
+              "bag",
+              "json",
+              "mp4",
+              "other"
+            ]
+          },
+          "sample_rate_hz": {
+            "$ref": "#/$defs/tracked_number"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "unit": {
+                  "$ref": "#/$defs/text"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "results": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metrics",
+        "media",
+        "limitations",
+        "future_work"
+      ],
+      "properties": {
+        "metrics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "metric",
+              "value",
+              "unit"
+            ],
+            "properties": {
+              "metric": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "$ref": "#/$defs/tracked_number"
+              },
+              "unit": {
+                "$ref": "#/$defs/text"
+              },
+              "conditions": {
+                "$ref": "#/$defs/text"
+              }
+            }
+          }
+        },
+        "media": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "file"
+            ],
+            "properties": {
+              "file": {
+                "type": "string",
+                "minLength": 1
+              },
+              "caption": {
+                "$ref": "#/$defs/text"
+              },
+              "part": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Subsystem id this figure or video shows, so it appears on that part's card. null = the whole project."
+              }
+            }
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "future_work": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instructor_approved"
+      ],
+      "properties": {
+        "extraction_model": {
+          "$ref": "#/$defs/text"
+        },
+        "extracted_at": {
+          "$ref": "#/$defs/text"
+        },
+        "student_confirmed_at": {
+          "$ref": "#/$defs/text"
+        },
+        "instructor_approved": {
+          "type": "boolean"
+        },
+        "instructor_notes": {
+          "$ref": "#/$defs/text"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "text": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "extracted",
+        "confirmed",
+        "missing_confirmed"
+      ]
+    },
+    "tracked_number": {
+      "description": "[tracked] value with provenance. value may be null - never guessed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "status"
+      ],
+      "properties": {
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "source_ref": {
+          "$ref": "#/$defs/text"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        }
+      }
+    },
+    "tracked_integer": {
+      "description": "[tracked] integer value with provenance.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "status"
+      ],
+      "properties": {
+        "value": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "source_ref": {
+          "$ref": "#/$defs/text"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        }
+      }
+    }
+  }
+}

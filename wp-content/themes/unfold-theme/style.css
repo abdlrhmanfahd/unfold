@@ -1,0 +1,117 @@
+/*
+Theme Name: Unfold
+Description: Block theme for Unfold — engineering projects presented as explorable systems. Pairs with the Unfold plugin.
+Version: 0.4.0
+Requires at least: 6.7
+Requires PHP: 7.4
+Author: Unfold
+License: GPL-2.0-or-later
+Text Domain: unfold-theme
+*/
+
+:root {
+	--uf-white: #FFFFFF;
+	--uf-panel-c: #F5F7F9;
+	--uf-grid-c: #E9EDF1;
+	--uf-line-c: #DCE2E8;
+	--uf-line-2c: #C5CED8;
+	--uf-ink-c: #0F1720;
+	--uf-dim-c: #566270;
+	--uf-signal: #0B8A7A;
+	--uf-signal-fill: #12B39C;
+	--uf-signal-soft: #E3F5F1;
+}
+
+/* Line icons (inline SVG, 24×24, stroke = currentColor) */
+.uf-i { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; vertical-align: -3px; }
+
+/* ---------- Header ---------- */
+.uf-site-header { position: relative; z-index: 30; background: var(--uf-white); }
+.uf-site-header .wp-block-site-title a { text-decoration: none; display: inline-flex; align-items: center; gap: 10px; }
+.uf-site-header .wp-block-site-title a::before {
+	content: ""; width: 22px; height: 22px; background: var(--uf-signal);
+	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='7' height='7' rx='1.5'/%3E%3Crect x='14' y='14' width='7' height='7' rx='1.5'/%3E%3Cpath d='M10 6.5h4a2 2 0 0 1 2 2V14'/%3E%3C/svg%3E") center / contain no-repeat;
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='7' height='7' rx='1.5'/%3E%3Crect x='14' y='14' width='7' height='7' rx='1.5'/%3E%3Cpath d='M10 6.5h4a2 2 0 0 1 2 2V14'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.uf-site-header .wp-block-navigation a { text-decoration: none; }
+.uf-site-header .wp-block-navigation a:hover { color: var(--uf-ink-c); }
+.uf-site-header .wp-block-navigation { margin-left: auto; }
+.uf-account { display: inline-flex; align-items: center; gap: 8px; font-size: .92rem; font-weight: 600; text-decoration: none; color: #fff !important; background: var(--uf-ink-c); border-radius: 6px; padding: 9px 16px; white-space: nowrap; }
+.uf-account:hover { background: var(--uf-signal); }
+.uf-account.is-in { padding-left: 6px; }
+.uf-account .uf-avatar { width: 24px; height: 24px; font-size: .78rem; background: var(--uf-signal-fill); color: #fff; border-radius: 4px; }
+.uf-avatar { display: inline-grid; place-items: center; border-radius: 50%; font-weight: 600; }
+
+/* ---------- Landing ---------- */
+.uf-hero { display: grid; gap: 56px; grid-template-columns: minmax(0, 1fr); align-items: center; }
+@media (min-width: 960px) { .uf-hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); } }
+.uf-hero-title { font-size: clamp(2.5rem, 1.5rem + 3.6vw, 4.4rem); line-height: 1.03; letter-spacing: -.035em; font-weight: 600; margin: 0 0 22px; color: var(--uf-ink-c); }
+.uf-hero-title span { color: var(--uf-signal); }
+.uf-hero-lede { color: var(--uf-dim-c); font-size: 1.2rem; line-height: 1.6; margin: 0 0 30px; max-width: 32rem; }
+.uf-hero-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.uf-hbtn { display: inline-flex; gap: 8px; align-items: center; text-decoration: none !important; font-weight: 600; font-size: .95rem; padding: 11px 18px; border-radius: 6px; background: var(--uf-signal); color: #fff !important; border: 1px solid var(--uf-signal); }
+.uf-hbtn:hover { background: var(--uf-ink-c); border-color: var(--uf-ink-c); }
+.uf-hbtn--line { background: #fff; color: var(--uf-ink-c) !important; border-color: var(--uf-line-2c); }
+.uf-hbtn--line:hover { background: #fff; border-color: var(--uf-ink-c); }
+
+.uf-scope { border: 1px solid var(--uf-line-c); border-radius: 12px; padding: 20px 20px 14px; background-color: var(--uf-panel-c); background-image: linear-gradient(var(--uf-grid-c) 1px, transparent 1px), linear-gradient(90deg, var(--uf-grid-c) 1px, transparent 1px); background-size: 28px 28px; }
+.uf-scope svg.uf-loop { display: block; width: 100%; height: auto; }
+.uf-loop .node rect { fill: #fff; stroke: var(--uf-line-2c); stroke-width: 1.5; }
+.uf-loop .node.on rect { stroke: var(--uf-signal); fill: var(--uf-signal-soft); }
+.uf-loop .node text { fill: var(--uf-ink-c); font: 600 14px Onest, sans-serif; }
+.uf-loop .node .sub { fill: var(--uf-dim-c); font: 400 11.5px Onest, sans-serif; }
+.uf-loop .ic { stroke: var(--uf-signal); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.uf-loop .wire { stroke: #9AA7B4; stroke-width: 1.5; fill: none; }
+.uf-loop .wire-label { fill: var(--uf-dim-c); font: 400 11px Onest, sans-serif; }
+.uf-loop .pulse { stroke: var(--uf-signal-fill); stroke-width: 3; fill: none; stroke-linecap: round; stroke-dasharray: 14 520; animation: uf-run 3.2s linear infinite; }
+@keyframes uf-run { from { stroke-dashoffset: 534; } to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .uf-loop .pulse { animation: none; } }
+.uf-scope-caption { display: flex; gap: 8px; align-items: flex-start; color: var(--uf-dim-c); font-size: .82rem; margin: 10px 0 0; }
+
+.uf-steps4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--uf-line-c); border: 1px solid var(--uf-line-c); border-radius: 12px; overflow: hidden; margin-top: 28px; }
+@media (max-width: 900px) { .uf-steps4 { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 520px) { .uf-steps4 { grid-template-columns: 1fr; } }
+.uf-step4 { background: #fff; padding: 24px; }
+.uf-step4-ico { width: 40px; height: 40px; border-radius: 8px; display: grid; place-items: center; background: var(--uf-signal-soft); color: var(--uf-signal); }
+.uf-step4-ico .uf-i { width: 20px; height: 20px; vertical-align: 0; }
+.uf-step4-n { display: block; font-size: .78rem; color: var(--uf-dim-c); font-weight: 600; letter-spacing: .04em; margin-top: 16px; }
+.uf-step4 h3 { margin: 4px 0 8px; font-size: 1.2rem; letter-spacing: -.015em; }
+.uf-step4 p { margin: 0; color: var(--uf-dim-c); line-height: 1.55; font-size: .95rem; }
+
+/* ---------- Footer ---------- */
+
+:where(a, button, input, select, summary):focus-visible { outline: 3px solid var(--uf-signal-fill); outline-offset: 2px; }
+
+/* Wordmark */
+.uf-logo{display:inline-flex;align-items:center;color:var(--wp--preset--color--ink,#0F1720);line-height:0}
+.uf-logo svg{width:104px;height:auto;display:block}
+.uf-logo:hover{color:var(--wp--preset--color--signal,#0B8A7A)}
+.uf-logo:focus-visible{outline:2px solid #0B8A7A;outline-offset:4px;border-radius:2px}
+
+/* Footer */
+.uf-site-footer{background:#0F1720;color:#9AA7B4;margin-top:var(--wp--preset--spacing--60,4rem);padding-inline:max(clamp(16px,4vw,40px),env(safe-area-inset-left,0px)) max(clamp(16px,4vw,40px),env(safe-area-inset-right,0px))}
+.uf-foot-in{max-width:1160px;margin:0 auto;padding-block:3rem max(1.5rem,env(safe-area-inset-bottom,0px))}
+.uf-foot-top{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2.5rem}
+.uf-foot-brand{max-width:22rem;display:flex;flex-direction:column;gap:1rem}
+.uf-foot-logo{color:#F1F2F2;line-height:0;align-self:flex-start}
+.uf-foot-logo svg{width:132px;height:auto;display:block}
+.uf-foot-logo:hover{color:#12B39C}
+.uf-foot-brand p{margin:0;font-size:.95rem;line-height:1.55}
+.uf-foot-cols{display:flex;flex-wrap:wrap;gap:3.5rem}
+.uf-foot-cols div{display:flex;flex-direction:column;gap:.55rem}
+.uf-foot-cols h2{margin:0 0 .25rem;font-size:.8rem;font-weight:600;color:#F1F2F2}
+.uf-foot-cols a{color:#C5CED8;text-decoration:none;font-size:.95rem}
+.uf-foot-cols a:hover{color:#12B39C}
+.uf-foot-bottom{display:flex;flex-wrap:wrap;justify-content:space-between;gap:.5rem 1rem;margin-top:2.5rem;padding-top:1.25rem;border-top:1px solid #243140;font-size:.85rem;color:#7A8794}
+.uf-site-footer a:focus-visible{outline:2px solid #12B39C;outline-offset:3px;border-radius:2px}
+@media (max-width:600px){.uf-foot-cols{gap:2rem}}
+
+/* 3D worlds on the home page: own band, only when something is published */
+.ufw-home:has(.ufw-worlds){border-top:1px solid #DCE2E8;padding-block:var(--wp--preset--spacing--60)}
+.ufw-home:not(:has(.ufw-worlds)){display:none}
+.uf-gallery + .ufw-worlds,.wp-block-shortcode + .ufw-worlds{margin-top:2.5rem}
+
+
+/* Footer stays at the bottom of the window on short pages (sign in, 404) */
+.wp-site-blocks { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+.wp-site-blocks > footer { margin-top: auto; }

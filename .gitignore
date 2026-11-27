@@ -1,0 +1,38 @@
+# WordPress Core
+/wp-admin/
+/wp-includes/
+/wp-*.php
+/index.php
+/xmlrpc.php
+/license.txt
+/readme.html
+
+# Studio / Local WordPress Runtime & Database
+/wp-content/database/
+/wp-content/db.php
+/wp-content/mu-plugins/
+/wp-content/uploads/
+/wp-content/debug.log
+/wp-content/upgrade/
+/wp-content/cache/
+/wp-content/unfold-private/
+/wp-content/index.php
+
+# Default Bundled Plugins & Themes
+/wp-content/plugins/akismet/
+/wp-content/plugins/hello.php
+/wp-content/plugins/index.php
+/wp-content/themes/twentytwenty*/
+/wp-content/themes/index.php
+
+# Dependencies & Test Caches (leading slash preserves plugin assets/vendor/)
+/node_modules/
+/vendor/
+.phpunit.result.cache
+
+# Local Assistant / Tool Files & OS Metadata
+.claude/
+CLAUDE.md
+STUDIO.md
+.DS_Store
+Thumbs.db
