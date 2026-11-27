@@ -226,7 +226,9 @@
 					},
 				} );
 			} );
-			box.appendChild( el( 'label', { for: id, class: 'uff-label', text: labelFor( path, key ) + ( unit ? ' (' + unit + ')' : '' ) } ) );
+			var lbl = labelFor( path, key );
+			var unitSuffix = ( unit && lbl.toLowerCase().indexOf( '(' + unit.toLowerCase() + ')' ) === -1 ) ? ' (' + unit + ')' : '';
+			box.appendChild( el( 'label', { for: id, class: 'uff-label', text: lbl + unitSuffix } ) );
 			box.appendChild( el( 'div', { class: 'uff-tracked-row' }, [ num, src ] ) );
 			box.appendChild( el( 'div', { class: 'uff-pills', role: 'group', 'aria-label': 'Status' }, pills ) );
 			paint();
