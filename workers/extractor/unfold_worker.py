@@ -1097,10 +1097,11 @@ class LLMClient:
         text_chunks = []
         for p in parts:
             if p["type"] == "pdf":
-                text_chunks.append(f'<report name="{p["title"]}">\n{pdf_text(p["bytes"], max_chars=9_000)}\n</report>')
+                text_chunks.append(f'<report name="{p["title"]}">\n{pdf_text(p["bytes"], max_chars=8_000)}\n</report>')
             else:
-                text_chunks.append(p["text"])
-        user_text = "\n\n".join(text_chunks)[:11_000]
+                cap = 8_000 if p["text"].lstrip().startswith("<report ") else 10_000
+                text_chunks.append(p["text"][:cap])
+        user_text = "\n\n".join(text_chunks)[:18_000]
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user_text},
@@ -1247,41 +1248,43 @@ _OLLAMA_COMPACT_TEMPLATE = """Answer with ONE valid JSON object using ONLY these
 {
   "schema_version": "0.2",
   "meta": {
-    "title": "Short project title",
-    "question": "Short question answered by this project or null",
+    "title": null,
+    "question": null,
     "headline": null,
-    "short_description": "1-2 sentence summary from report",
-    "platform": {"mode": "qlabs_sim", "vehicle_count": {"value": null, "source_ref": null, "status": "extracted"}, "software_stack": ["python"]},
-    "keywords": ["LiDAR", "Obstacle Avoidance"]
+    "short_description": null,
+    "platform": {"mode": null, "vehicle_count": {"value": null, "source_ref": null, "status": "extracted"}, "software_stack": []},
+    "keywords": []
   },
   "goal": {
-    "problem_statement": "Problem description from report or null",
-    "objectives": ["Objective 1", "Objective 2"],
-    "success_criteria": [{"metric": "Stopping distance", "target": {"value": 1.0, "source_ref": "p. 2", "status": "extracted"}, "unit": "m"}]
+    "problem_statement": null,
+    "objectives": [],
+    "success_criteria": []
   },
-  "environment": {"scenario": "Scenario description or null", "map_source": "qlabs_builtin", "map_file": null, "obstacles": "static", "other_agents": null},
-  "sensors": [{"type": "lidar", "purpose": "...", "rate_hz": {"value": null, "source_ref": null, "status": "extracted"}, "used_by": ["perception"]}],
-  "subsystems": [{
-    "id": "perception", "name": "Perception", "plain": "Detects obstacles in under 9 words.",
-    "on": ["lidar"], "category": "perception", "description": "2-3 sentence explanation.",
-    "inputs": [], "outputs": [], "method": "Algorithm or null", "equations": [], "parameters": [],
-    "rate_hz": {"value": null, "source_ref": null, "status": "extracted"}, "code_files": ["file.py"], "sim": null
-  }],
-  "connections": [{"from": "perception", "to": "control", "signal": "obstacle state"}],
-  "data_files": [{"file": "runs.csv", "description": null, "subsystem": "control", "format": "csv", "sample_rate_hz": {"value": null, "source_ref": null, "status": "extracted"}, "columns": [{"name": "col", "unit": null}]}],
+  "environment": {"scenario": null, "map_source": null, "map_file": null, "obstacles": null, "other_agents": null},
+  "sensors": [],
+  "subsystems": [],
+  "connections": [],
+  "data_files": [],
   "results": {
-    "metrics": [{"metric": "Success rate", "value": {"value": 95, "source_ref": "p. 5", "status": "extracted"}, "unit": "%", "conditions": null}],
-    "media": [{"file": "plot.png", "caption": "Caption", "part": null}],
-    "limitations": ["Limitation 1"],
-    "future_work": ["Future improvement 1"]
+    "metrics": [],
+    "media": [],
+    "limitations": [],
+    "future_work": []
   }
 }
 Important rules:
-- Use null (or valid enum values) instead of copying placeholder pipes:
+- NEVER invent filenames or copy example text. Only use exact filenames that appear in the ZIP file inventory below; if none match, use [].
+- Valid enum values (or null when unstated):
   - meta.platform.mode: "qlabs_sim", "physical_qcar2", "both", or null
+  - meta.platform.software_stack items: "python", "matlab_simulink", "ros2", "other"
   - environment.map_source: "qlabs_builtin", "custom", "physical_track", "other", or null
   - environment.obstacles: "static", "dynamic", "both", "none", or null
-  - sensors[].type: "lidar", "rgb_camera", "depth_camera", "imu", "wheel_encoder", or "other"
+  - sensors items: {"type": "lidar|rgb_camera|depth_camera|imu|wheel_encoder|other", "purpose": null, "rate_hz": {"value": null, "source_ref": null, "status": "extracted"}, "used_by": []}
+  - subsystems items: {"id": "lowercase_id", "name": "1-3 Words", "plain": "Under 9 words.", "on": [], "category": "perception|localization|planning|control|task_allocation|fleet_coordination|communication|other", "description": null, "inputs": [], "outputs": [], "method": null, "equations": [], "parameters": [], "rate_hz": {"value": null, "source_ref": null, "status": "extracted"}, "code_files": [], "sim": null}
+  - connections items: {"from": "sub_id", "to": "sub_id", "signal": null}
+  - data_files items: {"file": "<exact file from inventory>", "description": null, "subsystem": null, "format": "csv", "sample_rate_hz": {"value": null, "source_ref": null, "status": "extracted"}, "columns": [{"name": "<exact header>", "unit": null}]}
+  - results.metrics items: {"metric": "<name>", "value": {"value": 0, "source_ref": null, "status": "extracted"}, "unit": null, "conditions": null}
+  - results.media items: {"file": "<exact image/video from inventory>", "caption": null, "part": null}
 - subsystem "name" MUST be 1-3 words; "plain" MUST be 1 short sentence under 10 words; "id" must match ^[a-z][a-z0-9_]*$."""
 
 _VALID_ROOT_KEYS = {"schema_version", "meta", "goal", "environment", "sensors", "subsystems", "connections", "data_files", "results"}
@@ -1293,6 +1296,64 @@ _VALID_MODES = {"qlabs_sim", "physical_qcar2", "both", None}
 _VALID_STACKS = {"python", "matlab_simulink", "ros2", "other"}
 _VALID_MAP_SOURCES = {"qlabs_builtin", "custom", "physical_track", "other", None}
 _VALID_OBSTACLES = {"static", "dynamic", "both", "none", None}
+_PLACEHOLDER_LITERALS = {"can software fix bent wheels?", "algorithm or null", "caption", "..."}
+_PLACEHOLDER_RE = re.compile(r"^(?:limitation|future improvement|objective|metric|caption|short project title)\s*\d*$", re.I)
+
+
+def _is_placeholder_text(val) -> bool:
+    if not isinstance(val, str):
+        return False
+    text = val.strip()
+    if not text:
+        return True
+    low = text.lower()
+    return low in _PLACEHOLDER_LITERALS or bool(_PLACEHOLDER_RE.match(low))
+
+
+def _build_valid_file_maps(skeleton: dict, files: list[dict] | None) -> tuple[dict[str, str], dict[str, str]]:
+    """Return lowercase-to-real lookups for ZIP basenames and exact paths."""
+    by_basename: dict[str, str] = {}
+    by_path: dict[str, str] = {}
+    if files is not None:
+        for item in files:
+            if item.get("blocked"):
+                continue
+            path = str(item.get("path") or "").strip()
+            if not path:
+                continue
+            base = PurePosixPath(path).name
+            by_basename.setdefault(path.lower(), base)
+            by_basename.setdefault(base.lower(), base)
+            by_path.setdefault(path.lower(), path)
+            by_path.setdefault(base.lower(), path)
+        return by_basename, by_path
+
+    for df in skeleton.get("data_files") or []:
+        f = str(df.get("file") or "").strip()
+        if f:
+            by_basename.setdefault(f.lower(), PurePosixPath(f).name)
+    for m in (skeleton.get("results") or {}).get("media") or []:
+        f = str(m.get("file") or "").strip()
+        if f:
+            by_basename.setdefault(f.lower(), PurePosixPath(f).name)
+    for s in skeleton.get("subsystems") or []:
+        for c in s.get("code_files") or []:
+            c_str = str(c).strip()
+            if c_str:
+                base = PurePosixPath(c_str).name
+                by_path.setdefault(c_str.lower(), c_str)
+                by_path.setdefault(base.lower(), c_str)
+    return by_basename, by_path
+
+
+def _resolve_valid_file(raw_name, lookup: dict[str, str]) -> str | None:
+    if not isinstance(raw_name, str) or not raw_name.strip():
+        return None
+    cleaned = raw_name.strip().replace("\\", "/")
+    if cleaned.lower() in lookup:
+        return lookup[cleaned.lower()]
+    base = PurePosixPath(cleaned).name.lower()
+    return lookup.get(base)
 
 
 def _deep_merge_prefer_ai(ai_val, skel_val):
@@ -1320,11 +1381,12 @@ def _deep_merge_prefer_ai(ai_val, skel_val):
     return copy.deepcopy(skel_val)
 
 
-def merge_with_skeleton(ai_data: dict, skeleton: dict) -> dict:
-    """Normalize AI output against schema-valid skeleton so partial/small models never produce missing keys."""
+def merge_with_skeleton(ai_data: dict, skeleton: dict, files: list[dict] | None = None) -> dict:
+    """Normalize AI output against schema-valid skeleton and real ZIP files."""
     if not isinstance(ai_data, dict):
         return copy.deepcopy(skeleton)
     cleaned = {k: v for k, v in ai_data.items() if k in _VALID_ROOT_KEYS}
+    valid_by_base, valid_by_path = _build_valid_file_maps(skeleton, files)
 
     # Rescue fields if a tiny model nested them under a hallucinated wrapper like project_description.
     if "meta" not in cleaned and isinstance(ai_data.get("project_description"), dict):
@@ -1340,6 +1402,16 @@ def merge_with_skeleton(ai_data: dict, skeleton: dict) -> dict:
         "goal": _deep_merge_prefer_ai(cleaned.get("goal"), skeleton["goal"]),
         "environment": _deep_merge_prefer_ai(cleaned.get("environment"), skeleton["environment"]),
     }
+    if _is_placeholder_text(merged["meta"].get("question")):
+        merged["meta"]["question"] = skeleton["meta"].get("question")
+    if _is_placeholder_text(merged["meta"].get("title")):
+        merged["meta"]["title"] = skeleton["meta"].get("title")
+    if _is_placeholder_text(merged["meta"].get("short_description")):
+        merged["meta"]["short_description"] = skeleton["meta"].get("short_description")
+
+    objectives = [o for o in (merged["goal"].get("objectives") or []) if isinstance(o, str) and not _is_placeholder_text(o)]
+    merged["goal"]["objectives"] = objectives if objectives else copy.deepcopy(skeleton["goal"].get("objectives") or [])
+
     plat = merged["meta"].get("platform") or {}
     if plat.get("mode") not in _VALID_MODES:
         plat["mode"] = skeleton["meta"]["platform"]["mode"]
@@ -1350,7 +1422,9 @@ def merge_with_skeleton(ai_data: dict, skeleton: dict) -> dict:
     if merged["environment"].get("obstacles") not in _VALID_OBSTACLES:
         merged["environment"]["obstacles"] = skeleton["environment"]["obstacles"]
 
-    # Normalize subsystems.
+    # Normalize subsystems and backfill AST details from skeleton.
+    skel_subs = copy.deepcopy(skeleton.get("subsystems") or [])
+    skel_by_id = {s["id"]: s for s in skel_subs}
     ai_subs = cleaned.get("subsystems")
     norm_subs: list[dict] = []
     if isinstance(ai_subs, list):
@@ -1372,7 +1446,14 @@ def merge_with_skeleton(ai_data: dict, skeleton: dict) -> dict:
                 plain = " ".join(p_words[:8]).rstrip(".,;:") + "."
             cat = raw_s.get("category") if raw_s.get("category") in _VALID_CATEGORIES else "other"
             on_hw = [x for x in (raw_s.get("on") or []) if x in _VALID_ON]
-            norm_subs.append({
+            method = raw_s.get("method") if isinstance(raw_s.get("method"), str) and not _is_placeholder_text(raw_s.get("method")) else None
+            raw_code = [c for c in (raw_s.get("code_files") or []) if isinstance(c, str) and c.strip()]
+            if valid_by_path:
+                code_files = [resolved for c in raw_code if (resolved := _resolve_valid_file(c, valid_by_path)) is not None]
+            else:
+                code_files = raw_code
+
+            sub_obj = {
                 "id": sid,
                 "name": name,
                 "plain": plain,
@@ -1381,14 +1462,35 @@ def merge_with_skeleton(ai_data: dict, skeleton: dict) -> dict:
                 "description": raw_s.get("description") or plain,
                 "inputs": raw_s.get("inputs") if isinstance(raw_s.get("inputs"), list) else [],
                 "outputs": raw_s.get("outputs") if isinstance(raw_s.get("outputs"), list) else [],
-                "method": raw_s.get("method") if isinstance(raw_s.get("method"), str) else None,
+                "method": method,
                 "equations": [e for e in (raw_s.get("equations") or []) if isinstance(e, str) and e.strip()],
                 "parameters": raw_s.get("parameters") if isinstance(raw_s.get("parameters"), list) else [],
                 "rate_hz": _deep_merge_prefer_ai(raw_s.get("rate_hz"), _tracked_null()),
-                "code_files": [c for c in (raw_s.get("code_files") or []) if isinstance(c, str) and c.strip()],
+                "code_files": code_files,
                 "sim": raw_s.get("sim") if isinstance(raw_s.get("sim"), dict) else None,
-            })
-    merged["subsystems"] = norm_subs if norm_subs else copy.deepcopy(skeleton["subsystems"])
+            }
+            if sid in skel_by_id:
+                sk = skel_by_id[sid]
+                if not sub_obj["code_files"]:
+                    sub_obj["code_files"] = copy.deepcopy(sk.get("code_files") or [])
+                if not sub_obj["parameters"]:
+                    sub_obj["parameters"] = copy.deepcopy(sk.get("parameters") or [])
+                if not sub_obj["on"]:
+                    sub_obj["on"] = copy.deepcopy(sk.get("on") or [])
+                if sub_obj["rate_hz"].get("value") is None:
+                    sub_obj["rate_hz"] = copy.deepcopy(sk.get("rate_hz") or _tracked_null())
+            norm_subs.append(sub_obj)
+
+    if not norm_subs:
+        merged["subsystems"] = skel_subs
+    else:
+        if len(norm_subs) < len(skel_subs):
+            seen_sub_ids = {s["id"] for s in norm_subs}
+            for sk in skel_subs:
+                if sk["id"] not in seen_sub_ids:
+                    norm_subs.append(sk)
+                    seen_sub_ids.add(sk["id"])
+        merged["subsystems"] = norm_subs
     valid_sub_ids = {s["id"] for s in merged["subsystems"]}
 
     # Connections referencing valid subsystems.
@@ -1402,49 +1504,100 @@ def merge_with_skeleton(ai_data: dict, skeleton: dict) -> dict:
         c for c in skeleton["connections"] if c["from"] in valid_sub_ids and c["to"] in valid_sub_ids
     ]
 
-    # Sensors.
+    # Sensors (keep AI sensors, backfill empty used_by/rate_hz, and include AST/text-detected skeleton sensors).
+    skel_sensors_by_type = {sr["type"]: sr for sr in (skeleton.get("sensors") or []) if sr.get("type") in _VALID_SENSORS}
     ai_sensors = cleaned.get("sensors")
     norm_sensors = []
+    seen_sensor_types: set[str] = set()
     if isinstance(ai_sensors, list):
         for sr in ai_sensors:
             if not isinstance(sr, dict) or sr.get("type") not in _VALID_SENSORS:
                 continue
+            stype = sr["type"]
             used_by = [u for u in (sr.get("used_by") or []) if u in valid_sub_ids]
+            rate_hz = _deep_merge_prefer_ai(sr.get("rate_hz"), _tracked_null())
+            if stype in skel_sensors_by_type:
+                sk_sr = skel_sensors_by_type[stype]
+                if not used_by:
+                    used_by = [u for u in (sk_sr.get("used_by") or []) if u in valid_sub_ids]
+                if rate_hz.get("value") is None:
+                    rate_hz = copy.deepcopy(sk_sr.get("rate_hz") or _tracked_null())
+            seen_sensor_types.add(stype)
             norm_sensors.append({
-                "type": sr["type"],
+                "type": stype,
                 "purpose": sr.get("purpose") if isinstance(sr.get("purpose"), str) else None,
-                "rate_hz": _deep_merge_prefer_ai(sr.get("rate_hz"), _tracked_null()),
+                "rate_hz": rate_hz,
                 "used_by": used_by,
             })
+    for stype, sk_sr in skel_sensors_by_type.items():
+        if stype not in seen_sensor_types:
+            sr_copy = copy.deepcopy(sk_sr)
+            sr_copy["used_by"] = [u for u in (sr_copy.get("used_by") or []) if u in valid_sub_ids]
+            norm_sensors.append(sr_copy)
     merged["sensors"] = norm_sensors if norm_sensors else copy.deepcopy(skeleton["sensors"])
 
-    # Data files (guarantee required "format").
+    # Data files (drop hallucinated names not in ZIP, normalize to real ZIP basenames, merge skeleton CSVs).
     ai_df = cleaned.get("data_files")
     norm_df = []
+    seen_df_lower: set[str] = set()
     if isinstance(ai_df, list):
         for df in ai_df:
             if not isinstance(df, dict) or not str(df.get("file") or "").strip():
                 continue
+            resolved = _resolve_valid_file(df.get("file"), valid_by_base)
+            if not resolved:
+                continue
+            low_file = resolved.lower()
+            if low_file in seen_df_lower:
+                continue
+            seen_df_lower.add(low_file)
             fmt = df.get("format") if df.get("format") in _VALID_FORMATS else "csv"
             sub = df.get("subsystem") if df.get("subsystem") in valid_sub_ids else None
             cols = [c for c in (df.get("columns") or []) if isinstance(c, dict) and str(c.get("name") or "").strip()]
             norm_df.append({
-                "file": str(df["file"]).strip(),
+                "file": resolved,
                 "description": df.get("description") if isinstance(df.get("description"), str) else None,
                 "subsystem": sub,
                 "format": fmt,
                 "sample_rate_hz": _deep_merge_prefer_ai(df.get("sample_rate_hz"), _tracked_null()),
                 "columns": cols,
             })
-    merged["data_files"] = norm_df if norm_df else copy.deepcopy(skeleton["data_files"])
+    for sk_df in (skeleton.get("data_files") or []):
+        if len(norm_df) >= 10:
+            break
+        sk_name = str(sk_df.get("file") or "").strip()
+        if sk_name and sk_name.lower() not in seen_df_lower:
+            norm_df.append(copy.deepcopy(sk_df))
+            seen_df_lower.add(sk_name.lower())
+    merged["data_files"] = norm_df[:10] if norm_df else copy.deepcopy(skeleton["data_files"])
 
-    # Results & media (ensure no unknown keys like "type").
+    # Results, metrics, limitations, future_work & media (grounded against ZIP and free of placeholders).
     merged["results"] = _deep_merge_prefer_ai(cleaned.get("results"), skeleton["results"])
+    clean_metrics = [
+        mt for mt in (merged["results"].get("metrics") or [])
+        if isinstance(mt, dict) and not _is_placeholder_text(mt.get("metric"))
+    ]
+    merged["results"]["metrics"] = clean_metrics if clean_metrics else copy.deepcopy(skeleton["results"].get("metrics") or [])
+
+    clean_lims = [x for x in (merged["results"].get("limitations") or []) if isinstance(x, str) and not _is_placeholder_text(x)]
+    merged["results"]["limitations"] = clean_lims if clean_lims else copy.deepcopy(skeleton["results"].get("limitations") or [])
+
+    clean_fw = [x for x in (merged["results"].get("future_work") or []) if isinstance(x, str) and not _is_placeholder_text(x)]
+    merged["results"]["future_work"] = clean_fw if clean_fw else copy.deepcopy(skeleton["results"].get("future_work") or [])
+
     clean_media = []
+    seen_media_lower: set[str] = set()
     for m in (merged["results"].get("media") or []):
-        if isinstance(m, dict) and str(m.get("file") or "").strip():
-            part = m.get("part") if m.get("part") in valid_sub_ids else None
-            clean_media.append({"file": str(m["file"]).strip(), "caption": m.get("caption") if isinstance(m.get("caption"), str) else None, "part": part})
+        if not isinstance(m, dict) or not str(m.get("file") or "").strip():
+            continue
+        resolved = _resolve_valid_file(m.get("file"), valid_by_base)
+        if not resolved or resolved.lower() in seen_media_lower:
+            continue
+        seen_media_lower.add(resolved.lower())
+        part = m.get("part") if m.get("part") in valid_sub_ids else None
+        raw_cap = m.get("caption")
+        caption = raw_cap if isinstance(raw_cap, str) and not _is_placeholder_text(raw_cap) else None
+        clean_media.append({"file": resolved, "caption": caption, "part": part})
     merged["results"]["media"] = clean_media if clean_media else copy.deepcopy(skeleton["results"]["media"])
     return merged
 
@@ -1464,7 +1617,7 @@ def extract_project(client: LLMClient, zip_bytes: bytes, files: list[dict], repo
             + json.dumps(output_schema(schema), separators=(",", ":"))
         )
     data, meta = client.ask_json(system, parts, max_tokens=65536)
-    return enforce_rules(merge_with_skeleton(data, skeleton)), meta
+    return enforce_rules(merge_with_skeleton(data, skeleton, files=files)), meta
 
 
 CHECKLIST_PROMPT = """You read an instructor's assignment brief for a university engineering project and list \
