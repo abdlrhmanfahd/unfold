@@ -142,7 +142,7 @@
 	 */
 	function buildSolid( d, M ) {
 		const { nv, nt } = d.mesh, buf = d.meshBuf;
-		const p16 = new Int16Array( buf, 0, 3 * nv ), c8 = new Uint8Array( buf, 6 * nv, 3 * nv );
+		const p16 = new Int16Array( buf, 0, 3 * nv );
 		const hasAo = !! d.mesh.ao, ao8 = hasAo ? new Uint8Array( buf, 9 * nv, nv ) : null;
 		const idx = new Uint32Array( buf, Math.ceil( ( hasAo ? 10 : 9 ) * nv / 4 ) * 4, 3 * nt );
 		const pos = new Float32Array( 3 * nv ), col = new Float32Array( 3 * nv );
@@ -268,7 +268,7 @@
 				images.set( key, bmp ); if ( images.size > 60 ) { const k = images.keys().next().value; images.get( k ).close && images.get( k ).close(); images.delete( k ); }
 				draw( bmp );
 			} );
-		} );
+		} ).catch( () => {} );
 	}
 	function showScan( d, i ) {
 		if ( ! d.scans || i === shownScan ) return;
@@ -283,7 +283,7 @@
 			for ( let k = 0; k < m; k++ ) { P[ 3 * k ] = x[ k ] / 100; P[ 3 * k + 1 ] = y[ k ] / 100; P[ 3 * k + 2 ] = z[ k ] / 100; }
 			geo.attributes.position.needsUpdate = true; geo.setDrawRange( 0, m );
 			scanObj.matrix.copy( matrixFor( d ) ); scanObj.matrixWorldNeedsUpdate = true;
-		} );
+		} ).catch( () => {} );
 	}
 
 	/* Floor under the car: the LiDAR sits a fixed height above it (measured by plan_session.py). */
@@ -358,7 +358,7 @@
 
 	function loop( now ) {
 		requestAnimationFrame( loop );
-		if ( ! active ) return;
+		if ( ! active || document.hidden || ! holder.clientWidth || ! holder.clientHeight ) { last = now; return; }
 		if ( playing ) {
 			t += Math.min( 0.1, ( now - last ) / 1000 ) * speed;
 			if ( t >= duration ) {
@@ -450,7 +450,8 @@
 			const g = new THREE.BufferGeometry(); g.setAttribute( 'position', new THREE.BufferAttribute( new Float32Array( 3 * maxN ), 3 ) ); g.setDrawRange( 0, 0 );
 			scanObj = new THREE.Points( g, new THREE.PointsMaterial( { color: 0x5EEAD4, size: ( narrow() ? 2.4 : 3 ) * Math.min( window.devicePixelRatio || 1, 2 ), sizeAttenuation: false, transparent: true, opacity: 0.95, depthWrite: false } ) );
 			scanObj.matrixAutoUpdate = false; scanObj.frustumCulled = false; scene.add( scanObj );
-			drivesEl.innerHTML = drives.length > 1 ? '<button type="button" data-drive="all" aria-pressed="true">All</button>' + drives.map( d => '<button type="button" data-drive="' + d.id + '" aria-pressed="false">' + String( d.name ).replace( /[&<>"']/g, '' ) + '</button>' ).join( '' ) : '';
+			const esc = s => String( s == null ? '' : s ).replace( /[&<>"']/g, c => ( { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ c ] ) );
+			drivesEl.innerHTML = drives.length > 1 ? '<button type="button" data-drive="all" aria-pressed="true">All</button>' + drives.map( d => '<button type="button" data-drive="' + d.id + '" aria-pressed="false">' + esc( d.name ) + '</button>' ).join( '' ) : '';
 			say( '' ); size(); activate( drives[ 0 ] ); requestAnimationFrame( loop );
 		} );
 	} ).catch( e => say( 'The world could not be loaded: ' + e.message ) );
@@ -495,7 +496,7 @@
 		if ( want !== 'sim' ) setPlaying( false ); else size();
 	} ) );
 	document.addEventListener( 'keydown', e => {
-		if ( e.target.closest( 'input, textarea, select' ) ) return;
+		if ( document.hidden || ! holder.clientWidth || e.target.closest( 'input, textarea, select, button, a' ) ) return;
 		if ( e.code === 'Space' ) { e.preventDefault(); setPlaying( ! playing ); }
 	} );
 }() );

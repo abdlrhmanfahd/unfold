@@ -36,7 +36,7 @@ export default [
       "no-obj-calls": "error",
       "no-sparse-arrays": "error",
       "no-unsafe-negation": "error",
-      "no-unused-vars": "warn"
+      "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
     }
   }
 ];

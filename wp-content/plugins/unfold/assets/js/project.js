@@ -103,7 +103,8 @@
 		}
 	} );
 
-	var hash = decodeURIComponent( location.hash || '' );
+	var hash = '';
+	try { hash = decodeURIComponent( location.hash || '' ); } catch { hash = ''; }
 	if ( hash.indexOf( '#sub-' ) === 0 ) {
 		var hid = hash.slice( 5 );
 		if ( activate( hid ) ) {
@@ -127,7 +128,7 @@
 					output: 'htmlAndMathml',
 				} );
 				el.classList.add( 'is-rendered' );
-			} catch ( err ) {
+			} catch {
 				/* Leave the raw LaTeX visible. */
 			}
 		} );
@@ -183,7 +184,7 @@
 		var spec;
 		try {
 			spec = JSON.parse( diagram.getAttribute( 'data-uf-diagram' ) );
-		} catch ( e ) {
+		} catch {
 			return;
 		}
 		if ( ! spec.nodes.length ) {
@@ -265,7 +266,7 @@
 		if ( T.nonce ) headers[ 'X-WP-Nonce' ] = T.nonce;
 		try {
 			fetch( T.url, { method: 'POST', credentials: 'same-origin', keepalive: true, headers: headers, body: JSON.stringify( { project: T.project, kind: kind } ) } ).catch( function () {} );
-		} catch ( e ) {}
+		} catch {}
 	}
 	if ( T ) {
 		track( 'view' );
@@ -300,7 +301,7 @@
 				units[ c.name ] = c.unit;
 				declared.push( c.name );
 			} );
-		} catch ( e ) {}
+		} catch {}
 		fetch( el.getAttribute( 'data-uf-csv' ), { credentials: 'same-origin' } )
 			.then( function ( r ) { if ( ! r.ok ) throw new Error( r.status ); return r.text(); } )
 			.then( function ( txt ) {

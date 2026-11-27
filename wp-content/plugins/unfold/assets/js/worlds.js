@@ -13,7 +13,7 @@
 		if ( raw ) { opts.body = body; opts.headers[ 'Content-Type' ] = 'application/octet-stream'; }
 		else if ( body !== undefined ) { opts.body = JSON.stringify( body ); opts.headers[ 'Content-Type' ] = 'application/json'; }
 		return fetch( C.rest + path, opts ).then( r => r.text().then( t => {
-			let j = null; try { j = t ? JSON.parse( t ) : null; } catch ( e ) {}
+			let j = null; try { j = t ? JSON.parse( t ) : null; } catch {}
 			if ( ! r.ok ) throw new Error( ( j && j.message ) || 'Request failed (' + r.status + ')' );
 			return j;
 		} ) );
@@ -68,13 +68,13 @@
 		const seen = Math.max( workerSeen, ...w.drives.map( d => ( d.progress && d.progress.at ) || 0 ) );
 		const idle = Date.now() / 1000 - clockSkew - seen > 60;
 		return '<article class="ufw-card" data-world="' + w.id + '"><div class="ufw-card-head"><h3>' + esc( w.name ) + '</h3><div class="ufw-card-actions">'
-			+ '<label class="ufw-btn ufw-btn--ghost"' + ( up ? ' aria-disabled="true"' : '' ) + '>Add a recording<input type="file" accept=".zip" hidden data-upload="' + w.id + '"' + ( up ? ' disabled' : '' ) + '></label>'
+			+ '<label class="ufw-btn ufw-btn--ghost"' + ( up ? ' aria-disabled="true"' : '' ) + '>Add a recording<input type="file" accept=".zip" class="screen-reader-text" data-upload="' + w.id + '"' + ( up ? ' disabled' : '' ) + '></label>'
 			+ ( w.published ? '<a class="ufw-live" href="' + esc( w.url ) + '">On the site ↗</a>' : ( ready ? '<button type="button" class="ufw-btn ufw-btn--pub" data-publish="' + w.id + '">Publish</button>' : '' ) )
 			+ ( ready ? '<a class="ufw-btn ufw-btn--go" href="' + esc( C.worldUrl.replace( '__ID__', w.id ) ) + '">Open 3D</a>' : '<button class="ufw-btn ufw-btn--go" type="button" disabled>Open 3D</button>' )
 			+ more( 'World options', ( w.published ? '<button type="button" class="ufw-x ufw-x--plain" data-unpublish="' + w.id + '">Remove from the site</button>' : '' ) + '<button type="button" class="ufw-x ufw-x--plain" data-rename="worlds/' + w.id + '" data-name="' + esc( w.name ) + '">Rename world</button><button type="button" class="ufw-x" data-del-world="' + w.id + '" data-name="' + esc( w.name ) + '"' + ( w.drives.some( d => d.state === 'processing' ) || up ? ' disabled title="A recording is being built or uploaded"' : '' ) + '>Delete world</button>' )
 			+ '</div></div>'
 			+ ( w.drives.length ? w.drives.map( driveRow ).join( '' ) : '<p class="ufw-note">Upload the ZIP of a session folder exactly as it comes off the car (with bag/bag_0.db3 inside).</p>' )
-			+ ( up ? '<p class="ufw-note">' + esc( up ) + '</p>' : '' )
+			+ ( up ? '<p class="ufw-note" data-upload-status>' + esc( up ) + '</p>' : '' )
 			+ ( busy && idle ? '<p class="ufw-note ufw-note--warn">The 3D worker is not running on the lab computer, so recordings wait in line.</p>' : '' )
 			+ ( w.drives.length > 1 ? '<p class="ufw-note">Recordings after the first are placed next to it by matching what both of them saw.</p>' : '' )
 			+ '</article>';
@@ -105,7 +105,7 @@
 					offset = r.received;
 					const rate = offset / Math.max( 0.1, ( Date.now() - t0 ) / 1000 );
 					uploads[ worldId ] = 'Uploading ' + gb( offset ) + ' of ' + gb( file.size ) + ' · about ' + Math.ceil( ( file.size - offset ) / rate / 60 ) + ' min left';
-					const el = root.querySelector( '[data-world="' + worldId + '"] .ufw-note' );
+					const el = root.querySelector( '[data-world="' + worldId + '"] [data-upload-status]' );
 					if ( el ) el.textContent = uploads[ worldId ];
 					return next();
 				} );
@@ -123,7 +123,11 @@
 	} );
 	root.addEventListener( 'change', e => {
 		const id = e.target.dataset && e.target.dataset.upload;
-		if ( id && e.target.files[ 0 ] ) upload( +id, e.target.files[ 0 ] );
+		if ( id && e.target.files[ 0 ] ) {
+			const f = e.target.files[ 0 ];
+			e.target.value = '';
+			upload( +id, f );
+		}
 	} );
 	document.addEventListener( 'click', e => {
 		root.querySelectorAll( '.ufw-more[open]' ).forEach( m => { if ( ! m.contains( e.target ) ) m.removeAttribute( 'open' ); } );
