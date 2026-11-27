@@ -78,7 +78,7 @@
 	var ws = document.getElementById( 'uf-workspace' );
 	if ( ! ws || ! C.project ) return;
 
-	var P = null, form = null, dirty = false, saving = null, pollT = null, saveT = null;
+	var P = null, form = null, dirty = false, dirtyWhileSaving = false, saving = null, pollT = null, saveT = null;
 	var STEPS = [ [ 'upload', 'Upload' ], [ 'read', 'AI reads your files' ], [ 'review', 'You review' ], [ 'submit', 'Instructor review' ], [ 'live', 'Published' ] ];
 	var STEP_OF = { queued: 1, extracting: 1, failed: 1, review: 2, changes: 2, submitted: 3, approved: 4 };
 
@@ -171,14 +171,14 @@
 		var data = P.data || { schema_version: '0.1' };
 		form = window.UnfoldForm.mount( ws.querySelector( '[data-uf-form]' ), {
 			schema: C.schema, data: data, files: P.files || [],
-			onChange: function () { dirty = true; status( 'Unsaved changes' ); meter(); clearTimeout( saveT ); saveT = setTimeout( save, 2500 ); },
+			onChange: function () { dirty = true; if ( saving ) dirtyWhileSaving = true; status( 'Unsaved changes' ); meter(); clearTimeout( saveT ); saveT = setTimeout( function () { save().catch( function () {} ); }, 2500 ); },
 		} );
 		meter();
 		showErrors( P.errors );
-		ws.querySelector( '[data-uf-save]' ).addEventListener( 'click', function () { save(); } );
+		ws.querySelector( '[data-uf-save]' ).addEventListener( 'click', function () { save().catch( function () {} ); } );
 		ws.querySelector( '[data-uf-submit]' ).addEventListener( 'click', submit );
 		ws.querySelector( '[data-uf-preview]' ).addEventListener( 'click', function ( e ) {
-			if ( dirty ) { e.preventDefault(); var href = this.href; save().then( function () { location.href = href; } ); }
+			if ( dirty ) { e.preventDefault(); var href = this.href; save().then( function () { location.href = href; } ).catch( function () {} ); }
 		} );
 		status( P.valid ? 'All changes saved' : '' );
 	}
@@ -212,11 +212,24 @@
 		clearTimeout( saveT );
 		if ( saving ) return saving;
 		status( 'Saving…' );
+		dirtyWhileSaving = false;
 		saving = api( 'PUT', '/projects/' + C.project + '/data', { data: form.getData() } ).then( function ( p ) {
-			P.errors = p.errors; P.valid = p.valid; P.state = p.state; dirty = false;
-			status( p.errors.length ? 'Saved — ' + p.errors.length + ' to fix before submitting' : 'All changes saved' );
+			P.errors = p.errors; P.valid = p.valid; P.state = p.state;
 			showErrors( p.errors );
-		} ).catch( function ( e ) { status( 'Could not save: ' + e.message ); } ).then( function () { saving = null; } );
+			if ( dirtyWhileSaving ) {
+				saving = null;
+				return save();
+			}
+			dirty = false;
+			status( p.errors.length ? 'Saved — ' + p.errors.length + ' to fix before submitting' : 'All changes saved' );
+		}, function ( e ) {
+			saving = null;
+			status( 'Could not save: ' + e.message );
+			throw e;
+		} ).then( function ( res ) {
+			saving = null;
+			return res;
+		} );
 		return saving;
 	}
 
@@ -230,11 +243,13 @@
 			confirmBox( msg, function () {
 				api( 'POST', '/projects/' + C.project + '/submit' ).then( function ( p ) { P = p; render(); window.scrollTo( { top: 0, behavior: 'smooth' } ); } ).catch( function ( e ) { status( e.message ); } );
 			} );
-		} );
+		} ).catch( function () {} );
 	}
 
 	// In-page confirmation (no browser dialogs).
 	function confirmBox( msg, ok ) {
+		var old = ws.querySelector( '.uf-confirm' );
+		if ( old ) old.remove();
 		var bar = ws.querySelector( '.uf-savebar' );
 		var box = h( '<div class="uf-confirm" role="alertdialog" aria-live="assertive"><p>' + esc( msg ) + '</p><p class="uf-actions"><button class="uf-btn" data-yes>Submit</button> <button class="uf-btn uf-btn--ghost" data-no>Keep editing</button></p></div>' );
 		bar.parentNode.insertBefore( box, bar );

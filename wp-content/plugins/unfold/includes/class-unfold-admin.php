@@ -41,7 +41,7 @@ class Unfold_Admin {
 	}
 
 	public static function add_box() {
-		add_meta_box( 'unfold-json', __( 'Project data (JSON)', 'unfold' ), array( __CLASS__, 'render_box' ), Unfold_Post_Type::TYPE, 'normal', 'high' );
+		add_meta_box( 'unfold-json-box', __( 'Project data (JSON)', 'unfold' ), array( __CLASS__, 'render_box' ), Unfold_Post_Type::TYPE, 'normal', 'high' );
 	}
 
 	public static function render_box( $post ) {

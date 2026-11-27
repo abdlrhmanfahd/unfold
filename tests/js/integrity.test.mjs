@@ -81,3 +81,53 @@ test("unfold-theme templates and parts are non-empty and have balanced WP block 
     }
   }
 });
+
+test("plugin CSS files have balanced braces", () => {
+  const cssDir = path.resolve("wp-content/plugins/unfold/assets/css");
+  const files = fs.readdirSync(cssDir).filter((f) => f.endsWith(".css"));
+  assert.ok(files.length > 0, "Expected CSS files in assets/css");
+
+  for (const file of files) {
+    const raw = fs.readFileSync(path.join(cssDir, file), "utf8");
+    let depth = 0;
+    let inComment = false;
+    let quote = null;
+
+    for (let i = 0; i < raw.length; i += 1) {
+      const ch = raw[i];
+      const next = raw[i + 1];
+
+      if (inComment) {
+        if (ch === "*" && next === "/") {
+          inComment = false;
+          i += 1;
+        }
+        continue;
+      }
+      if (quote) {
+        if (ch === "\\") {
+          i += 1;
+        } else if (ch === quote) {
+          quote = null;
+        }
+        continue;
+      }
+      if (ch === "/" && next === "*") {
+        inComment = true;
+        i += 1;
+        continue;
+      }
+      if (ch === "'" || ch === '"') {
+        quote = ch;
+        continue;
+      }
+      if (ch === "{") {
+        depth += 1;
+      } else if (ch === "}") {
+        depth -= 1;
+        assert.ok(depth >= 0, `${file}: unexpected closing brace '}' at index ${i}`);
+      }
+    }
+    assert.equal(depth, 0, `${file}: unclosed '{' (brace depth ${depth})`);
+  }
+});
