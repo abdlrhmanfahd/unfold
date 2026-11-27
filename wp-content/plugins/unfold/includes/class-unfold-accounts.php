@@ -188,11 +188,15 @@ class Unfold_Accounts {
 		return $store[ $key ] ?? null;
 	}
 
+	private static function post_str( $key ) {
+		return ( isset( $_POST[ $key ] ) && is_string( $_POST[ $key ] ) ) ? wp_unslash( $_POST[ $key ] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification,WordPress.Security.ValidatedSanitizedInput
+	}
+
 	public static function handle_forms() {
-		if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) || empty( $_POST['unfold_form'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification
+		if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) || '' === self::post_str( 'unfold_form' ) ) { // phpcs:ignore WordPress.Security.NonceVerification
 			return;
 		}
-		$form = sanitize_key( wp_unslash( $_POST['unfold_form'] ) ); // phpcs:ignore WordPress.Security.NonceVerification
+		$form = sanitize_key( self::post_str( 'unfold_form' ) );
 		if ( 'login' === $form ) {
 			self::do_login();
 		} elseif ( 'register' === $form ) {
@@ -203,7 +207,8 @@ class Unfold_Accounts {
 	}
 
 	private static function nonce_ok( $field, $action ) {
-		return isset( $_POST[ $field ] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST[ $field ] ) ), $action );
+		$val = self::post_str( $field );
+		return '' !== $val && wp_verify_nonce( sanitize_text_field( $val ), $action );
 	}
 
 	private static function do_login() {
@@ -211,11 +216,11 @@ class Unfold_Accounts {
 			self::flash( 'login_error', __( 'Your session expired. Please try again.', 'unfold' ) );
 			return;
 		}
-		$login = sanitize_text_field( wp_unslash( $_POST['log'] ?? '' ) );
+		$login = sanitize_text_field( self::post_str( 'log' ) );
 		$user  = wp_signon(
 			array(
 				'user_login'    => $login,
-				'user_password' => (string) wp_unslash( $_POST['pwd'] ?? '' ), // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+				'user_password' => self::post_str( 'pwd' ),
 				'remember'      => ! empty( $_POST['rememberme'] ),
 			),
 			is_ssl()
@@ -238,7 +243,7 @@ class Unfold_Accounts {
 		if ( ! self::nonce_ok( '_unfold_resend', 'unfold_resend' ) ) {
 			return;
 		}
-		$login = sanitize_text_field( wp_unslash( $_POST['log'] ?? '' ) );
+		$login = sanitize_text_field( self::post_str( 'log' ) );
 		$user  = is_email( $login ) ? get_user_by( 'email', $login ) : get_user_by( 'login', $login );
 		// Same reply whatever happens, and at most one email per account per minute.
 		if ( $user && self::is_unverified( $user->ID ) && ! get_transient( 'unfold_resend_' . $user->ID ) ) {
@@ -256,9 +261,9 @@ class Unfold_Accounts {
 		if ( ! empty( $_POST['uf_website'] ) ) {
 			return; // Honeypot: bots fill every field.
 		}
-		$name  = sanitize_text_field( wp_unslash( $_POST['uf_name'] ?? '' ) );
-		$email = sanitize_email( wp_unslash( $_POST['uf_email'] ?? '' ) );
-		$pass  = (string) wp_unslash( $_POST['uf_password'] ?? '' ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+		$name  = sanitize_text_field( self::post_str( 'uf_name' ) );
+		$email = sanitize_email( self::post_str( 'uf_email' ) );
+		$pass  = self::post_str( 'uf_password' );
 
 		$errors = array();
 		if ( mb_strlen( $name ) < 2 ) {
@@ -300,7 +305,10 @@ class Unfold_Accounts {
 			return;
 		}
 		update_user_meta( $user_id, 'unfold_email_verified', '0' );
-		self::send_verification( $user_id );
+		if ( ! self::send_verification( $user_id ) ) {
+			self::flash( 'register_errors', array( __( 'Account created, but the confirmation email could not be sent. Please try resending from the sign-in page.', 'unfold' ) ) );
+			return;
+		}
 		self::flash( 'registered', $email );
 	}
 
