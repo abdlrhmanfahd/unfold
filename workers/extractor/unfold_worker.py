@@ -325,7 +325,8 @@ def read_secret_file(filename: str) -> str | None:
     ]
     for p in places:
         if p and os.path.isfile(p):
-            t = open(p, encoding="utf-8").read().strip()
+            with open(p, encoding="utf-8") as fh:
+                t = fh.read().strip()
             if t:
                 return t
     return None
