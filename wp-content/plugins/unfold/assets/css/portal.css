@@ -260,4 +260,8 @@
 .uf-ai-opt small { display: block; color: var(--uf-muted); font-size: .82rem; margin-top: 2px; }
 .uf-ai-byok { margin-top: var(--uf-s3); padding: var(--uf-s3); background: #fff; border: 1px solid var(--uf-line); border-radius: 10px; display: grid; gap: var(--uf-s3); }
 .uf-ai-status { display: inline-block; font-size: .82rem; font-weight: 600; color: #067647; background: #ecfdf3; border: 1px solid #abefc6; border-radius: 6px; padding: 3px 8px; margin-top: 4px; }
+.uf-pw-wrap { position: relative; display: flex; align-items: center; }
+.uf-pw-wrap input { padding-right: 72px; }
+.uf-pw-toggle { position: absolute; right: 8px; background: none; border: 0; padding: 6px 8px; font: inherit; font-size: .84rem; font-weight: 600; color: var(--uf-accent-ink); cursor: pointer; border-radius: 6px; }
+.uf-pw-toggle:focus-visible { outline: 2px solid var(--uf-accent); outline-offset: 2px; }
 .uf-ai-msg { font-size: .86rem; color: var(--uf-ink-2); margin: 0 !important; min-height: 1.1em; }
