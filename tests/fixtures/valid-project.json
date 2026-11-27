@@ -1,0 +1,341 @@
+{
+  "schema_version": "0.1",
+  "meta": {
+    "title": "Autonomous Warehouse Fleet Management",
+    "short_description": "A fleet of Quanser QCar 2 vehicles that share delivery tasks in a simulated warehouse, plan their own routes and avoid each other while driving.",
+    "platform": {
+      "mode": null,
+      "vehicle_count": {
+        "value": null,
+        "source_ref": null,
+        "status": "extracted"
+      },
+      "software_stack": []
+    },
+    "keywords": [
+      "fleet management",
+      "multi-agent",
+      "QCar 2",
+      "QLabs",
+      "PI control",
+      "path planning",
+      "task allocation",
+      "collision avoidance"
+    ]
+  },
+  "goal": {
+    "problem_statement": "Several autonomous vehicles must deliver orders inside a warehouse. Each order has to be assigned to a vehicle, every vehicle needs a route to its pickup and drop-off points, and vehicles must keep a safe distance from each other while tracking their planned speed.",
+    "objectives": [
+      "Assign incoming delivery tasks to the available vehicles",
+      "Plan a route for each vehicle through the warehouse map",
+      "Prevent collisions between vehicles",
+      "Track the reference speed on each vehicle with a PI controller"
+    ],
+    "success_criteria": [
+      {
+        "metric": "Average order delivery time",
+        "target": {
+          "value": null,
+          "source_ref": null,
+          "status": "extracted"
+        },
+        "unit": "s"
+      },
+      {
+        "metric": "Collisions per run",
+        "target": {
+          "value": null,
+          "source_ref": null,
+          "status": "extracted"
+        },
+        "unit": null
+      },
+      {
+        "metric": "Steady-state speed error",
+        "target": {
+          "value": null,
+          "source_ref": null,
+          "status": "extracted"
+        },
+        "unit": "m/s"
+      }
+    ]
+  },
+  "environment": {
+    "scenario": "Warehouse with shelves, pickup points and drop-off points",
+    "map_source": null,
+    "map_file": null,
+    "obstacles": null,
+    "other_agents": "Other QCar 2 vehicles in the fleet"
+  },
+  "sensors": [
+    {
+      "type": "wheel_encoder",
+      "purpose": "Measures vehicle speed for the speed controller",
+      "rate_hz": {
+        "value": null,
+        "source_ref": null,
+        "status": "extracted"
+      },
+      "used_by": [
+        "speed_ctrl"
+      ]
+    },
+    {
+      "type": "lidar",
+      "purpose": "Detects nearby vehicles and obstacles",
+      "rate_hz": {
+        "value": null,
+        "source_ref": null,
+        "status": "extracted"
+      },
+      "used_by": [
+        "collision_avoid"
+      ]
+    }
+  ],
+  "subsystems": [
+    {
+      "id": "task_alloc",
+      "name": "Task Allocation",
+      "category": "task_allocation",
+      "description": "Decides which vehicle handles each incoming delivery order. It looks at the open orders and the vehicles' current positions, then hands every vehicle a pickup and drop-off goal.",
+      "inputs": [
+        {
+          "name": "Open orders",
+          "unit": null,
+          "from": null
+        },
+        {
+          "name": "Vehicle positions",
+          "unit": "m",
+          "from": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Assigned goal per vehicle",
+          "unit": "m",
+          "to": "path_planning"
+        }
+      ],
+      "method": null,
+      "equations": [],
+      "parameters": [],
+      "rate_hz": {
+        "value": null,
+        "source_ref": null,
+        "status": "extracted"
+      },
+      "code_files": [],
+      "sim": null
+    },
+    {
+      "id": "path_planning",
+      "name": "Path Planning",
+      "category": "planning",
+      "description": "Finds a route through the warehouse map from each vehicle's position to its assigned goal, and turns that route into a reference speed for the vehicle to follow.",
+      "inputs": [
+        {
+          "name": "Assigned goal",
+          "unit": "m",
+          "from": "task_alloc"
+        },
+        {
+          "name": "Warehouse map",
+          "unit": null,
+          "from": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Planned path",
+          "unit": "m",
+          "to": "collision_avoid"
+        },
+        {
+          "name": "Reference speed",
+          "unit": "m/s",
+          "to": "collision_avoid"
+        }
+      ],
+      "method": null,
+      "equations": [],
+      "parameters": [],
+      "rate_hz": {
+        "value": null,
+        "source_ref": null,
+        "status": "extracted"
+      },
+      "code_files": [],
+      "sim": null
+    },
+    {
+      "id": "collision_avoid",
+      "name": "Collision Avoidance",
+      "category": "fleet_coordination",
+      "description": "Watches the space around each vehicle and slows it down or stops it when another vehicle or obstacle gets too close, passing a safe reference speed on to the speed controller.",
+      "inputs": [
+        {
+          "name": "Planned path",
+          "unit": "m",
+          "from": "path_planning"
+        },
+        {
+          "name": "Reference speed",
+          "unit": "m/s",
+          "from": "path_planning"
+        },
+        {
+          "name": "LiDAR scan",
+          "unit": "m",
+          "from": "lidar"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Safe reference speed",
+          "unit": "m/s",
+          "to": "speed_ctrl"
+        }
+      ],
+      "method": null,
+      "equations": [],
+      "parameters": [
+        {
+          "name": "safety_distance",
+          "value": null,
+          "unit": "m",
+          "source_ref": null,
+          "status": "extracted"
+        }
+      ],
+      "rate_hz": {
+        "value": null,
+        "source_ref": null,
+        "status": "extracted"
+      },
+      "code_files": [],
+      "sim": null
+    },
+    {
+      "id": "speed_ctrl",
+      "name": "PI Speed Controller",
+      "category": "control",
+      "description": "Keeps each vehicle at its reference speed. It compares the reference with the measured speed and sets the motor command from the error and from the error accumulated over time.",
+      "inputs": [
+        {
+          "name": "Safe reference speed",
+          "unit": "m/s",
+          "from": "collision_avoid"
+        },
+        {
+          "name": "Measured speed",
+          "unit": "m/s",
+          "from": "wheel_encoder"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Motor command",
+          "unit": null,
+          "to": "actuator"
+        }
+      ],
+      "method": "PI control",
+      "equations": [
+        "e(t) = v_{ref}(t) - v(t)",
+        "u(t) = K_p\\,e(t) + K_i \\int_0^t e(\\tau)\\,d\\tau"
+      ],
+      "parameters": [
+        {
+          "name": "Kp",
+          "value": null,
+          "unit": null,
+          "source_ref": null,
+          "status": "extracted"
+        },
+        {
+          "name": "Ki",
+          "value": null,
+          "unit": null,
+          "source_ref": null,
+          "status": "extracted"
+        }
+      ],
+      "rate_hz": {
+        "value": null,
+        "source_ref": null,
+        "status": "extracted"
+      },
+      "code_files": [],
+      "sim": {
+        "type": "conceptual",
+        "student_approved": false,
+        "template": null
+      }
+    }
+  ],
+  "connections": [
+    {
+      "from": "task_alloc",
+      "to": "path_planning",
+      "signal": "assigned goal"
+    },
+    {
+      "from": "path_planning",
+      "to": "collision_avoid",
+      "signal": "path + reference speed"
+    },
+    {
+      "from": "collision_avoid",
+      "to": "speed_ctrl",
+      "signal": "safe reference speed"
+    }
+  ],
+  "data_files": [],
+  "results": {
+    "metrics": [
+      {
+        "metric": "Average order delivery time",
+        "value": {
+          "value": null,
+          "source_ref": null,
+          "status": "extracted"
+        },
+        "unit": "s",
+        "conditions": null
+      },
+      {
+        "metric": "Collisions per run",
+        "value": {
+          "value": null,
+          "source_ref": null,
+          "status": "extracted"
+        },
+        "unit": null,
+        "conditions": null
+      },
+      {
+        "metric": "Steady-state speed error",
+        "value": {
+          "value": null,
+          "source_ref": null,
+          "status": "extracted"
+        },
+        "unit": "m/s",
+        "conditions": null
+      }
+    ],
+    "media": [],
+    "limitations": [],
+    "future_work": []
+  },
+  "review": {
+    "extraction_model": null,
+    "extracted_at": null,
+    "student_confirmed_at": null,
+    "instructor_approved": false,
+    "instructor_notes": null
+  }
+}

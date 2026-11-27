@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  php-checks:
+    name: php-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: zip, json, mbstring
+          coverage: none
+
+      - name: PHP Syntax Lint
+        run: |
+          find wp-content/plugins/unfold wp-content/themes/unfold-theme -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run PHPUnit tests
+        run: vendor/bin/phpunit
+
+  js-and-schema-checks:
+    name: js-and-schema-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run JS syntax, ESLint, and integrity tests
+        run: npm run check
