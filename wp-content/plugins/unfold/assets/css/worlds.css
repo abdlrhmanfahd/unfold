@@ -62,10 +62,10 @@
 .ufw-modes{position:absolute;top:12px;left:50%;transform:translateX(-50%);display:inline-flex;border-radius:99px;overflow:hidden;border:1px solid rgba(255,255,255,.2);background:rgba(15,23,32,.72)}
 .ufw-modes button{border:0;background:transparent;color:#C9D3DC;font:600 12.5px Onest,system-ui,sans-serif;padding:.4rem .75rem;cursor:pointer;white-space:nowrap}
 .ufw-modes button+button{border-left:1px solid rgba(255,255,255,.14)}
-.ufw-modes button[aria-pressed="true"]{background:#12B39C;color:#fff}
+.ufw-modes button[aria-pressed="true"]{background:#0A7A6B;color:#fff}
 .ufw-stage.is-clean{background:#15171B}
 .ufw-stage.is-split::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:2px;margin-left:-1px;background:rgba(255,255,255,.7);pointer-events:none}
-@media (max-width:900px){.ufw-modes{top:52px;left:12px;transform:none}}
+@media (max-width:960px){.ufw-modes{top:52px;left:12px;transform:none}}
 .ufw-views button,.ufw-toggles button{border:0;background:transparent;color:#C9D3DC;font:600 12.5px Onest,system-ui,sans-serif;padding:.4rem .75rem;cursor:pointer}
 .ufw-views button+button,.ufw-toggles button+button{border-left:1px solid rgba(255,255,255,.14)}
 .ufw-views button[aria-pressed="true"]{background:#fff;color:var(--ink)}
@@ -86,9 +86,10 @@
 .ufw-sim button:focus-visible,.ufw-sim input:focus-visible,.ufw button:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
 @media (max-width:640px){
   .ufw-stage{aspect-ratio:3/4;min-height:0}
+  .ufw-modes{max-width:calc(100% - 24px);flex-wrap:wrap;border-radius:14px}
   .ufw-inset{width:42%}
-  .ufw-toggles{top:auto;bottom:12px;right:auto;left:12px}
-  .ufw-hud{bottom:52px}
+  .ufw-toggles{top:96px;bottom:auto;right:auto;left:12px}
+  .ufw-hud{bottom:12px;max-width:52%;flex-wrap:wrap}
   .ufw-bar{border-radius:16px}
   .ufw-speed{margin-left:auto}
 }

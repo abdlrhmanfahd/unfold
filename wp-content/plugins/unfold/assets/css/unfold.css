@@ -180,8 +180,8 @@
 .uf-tab[aria-selected="true"] { background: var(--uf-ink); color: #fff; border-color: var(--uf-ink); }
 .uf-tab:focus-visible { outline: 3px solid var(--uf-accent); outline-offset: 2px; }
 .uf-tab-cat { width: .55em; height: .55em; border-radius: 50%; background: currentColor; flex: none; }
-.uf-tab-sim { font-size: .72em; font-weight: 600; color: var(--uf-data); }
-.uf-tab[aria-selected="true"] .uf-tab-sim { font-size: .72em; font-weight: 600; color: var(--uf-data); }
+.uf-tab-sim { font-size: .72em; font-weight: 600; color: #0A7366; }
+.uf-tab[aria-selected="true"] .uf-tab-sim { font-size: .72em; font-weight: 600; color: #5EEAD4; }
 .uf-panel { border: 1px solid var(--uf-line); border-radius: 12px; padding: var(--uf-s5); margin-bottom: var(--uf-s4); scroll-margin-top: 64px; }
 .uf-js .uf-panel:not(.is-active) { display: none; }
 .uf-js .uf-panel:focus { outline: none; }
@@ -240,6 +240,8 @@
 	.uf-table td::before { content: attr(data-label); font-size: .72rem; font-weight: 600; color: var(--uf-muted); padding-top: .2em; }
 	.uf-table td:first-child { grid-template-columns: 1fr; font-size: 1rem; }
 	.uf-table td:first-child::before { display: none; }
+	.uf-table td[data-label=""] { grid-template-columns: 1fr; }
+	.uf-table td[data-label=""]::before { display: none; }
 	.uf-table td:empty { display: none; }
 }
 
@@ -314,7 +316,7 @@
 .uf-btn--ghost:hover { background: #fff; border-color: var(--uf-ink); color: var(--uf-ink) !important; }
 .uf-keyresult { background: var(--uf-soft); border: 1px solid var(--uf-line); border-radius: 12px; padding: var(--uf-s5); }
 .uf-keyresult-value { font-size: clamp(2.6rem, 2rem + 1.8vw, 3.6rem); letter-spacing: -.04em; font-weight: 600; }
-.uf-keyresult-target { color: var(--uf-accent); font-weight: 600; }
+.uf-keyresult-target { color: #0A7366; font-weight: 600; }
 .uf-toc { background: rgba(255, 255, 255, .95); }
 .uf-toc a { border-radius: 6px; }
 .uf-toc a.is-active { background: var(--uf-ink); color: #fff; }
@@ -347,7 +349,7 @@
 .uf-card-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .82rem; color: var(--uf-muted); margin: 0 !important; order: -1; }
 .uf-card-meta span { display: inline-flex; gap: 6px; align-items: center; }
 .uf-card-meta .uf-i { width: 15px; height: 15px; vertical-align: 0; }
-.uf-card-sim { color: var(--uf-accent); font-weight: 600; }
+.uf-card-sim { color: #0A7366; font-weight: 600; }
 .unfold .uf-card-title { font-size: 1.3rem; font-weight: 600; letter-spacing: -.015em; line-height: 1.28; margin: 0; }
 .uf-card-desc { color: var(--uf-muted); font-size: .93rem; margin: 0 !important; }
 .uf-card-kv { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; border-top: 1px solid var(--uf-line); padding-top: 12px; margin-top: auto !important; font-size: .85rem; color: var(--uf-muted); }
