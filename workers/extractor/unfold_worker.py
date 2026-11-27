@@ -19,6 +19,7 @@ Environment:
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import copy
 import html
@@ -30,6 +31,7 @@ import re
 import sys
 import time
 import zipfile
+import zlib
 from pathlib import PurePosixPath
 
 import requests
@@ -184,16 +186,45 @@ def docx_text(data: bytes) -> str:
     return "\n".join(out)
 
 
+def _is_clean_text_chunk(text: str) -> bool:
+    """True when text looks like readable language rather than raw compressed/binary bytes."""
+    s = (text or "").strip()
+    if len(s) < 3:
+        return False
+    # Reject strings containing control characters or heavy extended-Latin1 binary noise.
+    bad = sum(1 for ch in s if (ord(ch) < 32 and ch not in "\n\r\t") or ord(ch) > 126)
+    if bad / len(s) > 0.08:
+        return False
+    good = sum(1 for ch in s if ch.isalnum() or ch in " \n\r\t.,;:!?()-_/+*=%[]'\"")
+    if good / len(s) < 0.78:
+        return False
+    return bool(re.search(r"[A-Za-z]{2,}", s))
+
+
+def _pdf_literal_strings(stream_bytes: bytes) -> list[str]:
+    """Pull readable literal strings out of PDF BT..ET text blocks."""
+    out: list[str] = []
+    blocks = re.findall(rb"BT\b(.*?)\bET", stream_bytes, flags=re.S) or [stream_bytes]
+    for blk in blocks:
+        for raw in re.findall(rb"\(([^()]{3,240})\)", blk):
+            # Ignore octal/binary escapes and non-ASCII junk.
+            decoded = re.sub(r"\\[nrtbf\\()]", " ", raw.decode("latin1", "ignore"))
+            decoded = re.sub(r"\s+", " ", decoded).strip()
+            if _is_clean_text_chunk(decoded):
+                out.append(decoded)
+    return out
+
+
 def pdf_text(data: bytes, max_chars: int = 120_000) -> str:
-    """Extract text locally from a PDF for text-only providers (Ollama / OpenAI-compat / fallback)."""
+    """Extract readable text from a PDF, never returning compressed binary gibberish."""
     try:
         from pypdf import PdfReader  # type: ignore
         reader = PdfReader(io.BytesIO(data))
         chunks = []
         total = 0
         for idx, page in enumerate(reader.pages, start=1):
-            t = (page.extract_text() or "").strip()
-            if t:
+            t = (page.extract_text() or "").replace("\x00", " ").strip()
+            if t and _is_clean_text_chunk(t):
                 chunk = f"[Page {idx}]\n{t}"
                 chunks.append(chunk)
                 total += len(chunk)
@@ -203,11 +234,22 @@ def pdf_text(data: bytes, max_chars: int = 120_000) -> str:
             return "\n\n".join(chunks)[:max_chars]
     except Exception:  # noqa: BLE001
         pass
-    # Minimal fallback: extract printable ASCII strings inside PDF text operators.
-    strings = re.findall(rb"\(([^()]{3,200})\)", data)
-    text = " ".join(s.decode("latin1", "ignore") for s in strings)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:max_chars]
+
+    # Safe fallback: only read BT..ET text operators inside decompressed or plain streams.
+    collected: list[str] = []
+    for raw_stream in re.findall(rb"stream\r?\n(.*?)\r?\nendstream", data, flags=re.S):
+        candidate = raw_stream
+        try:
+            candidate = zlib.decompress(raw_stream)
+        except Exception:  # noqa: BLE001
+            pass
+        collected.extend(_pdf_literal_strings(candidate))
+        if sum(len(c) for c in collected) >= max_chars:
+            break
+    if not collected and b"BT" in data:
+        collected.extend(_pdf_literal_strings(data))
+    text = re.sub(r"\s+", " ", " ".join(collected)).strip()
+    return text[:max_chars] if _is_clean_text_chunk(text) else ""
 
 
 def human_size(n: int) -> str:
@@ -340,54 +382,479 @@ def _tracked_null() -> dict:
     return {"value": None, "source_ref": None, "status": "extracted"}
 
 
-def local_rules_extract(zip_bytes: bytes, files: list[dict], report: str | None) -> tuple[dict, dict]:
-    """Deterministic zero-AI extraction fallback producing a valid project skeleton for manual editing."""
-    z = zipfile.ZipFile(io.BytesIO(zip_bytes))
-    title = PurePosixPath(report).stem.replace("_", " ").replace("-", " ").strip() if report else "Engineering Project"
-    if len(title) < 2:
-        title = "Engineering Project"
+_HELPER_CODE_RE = re.compile(r"(?:^|/)(?:make_|setup\.py$|__init__\.py$|.*submission.*\.py$)", re.I)
 
-    summary_text = ""
-    if report and report.lower().endswith(".docx"):
-        lines = [ln.strip() for ln in docx_text(z.read(report)).splitlines() if ln.strip()]
-        if lines and 3 <= len(lines[0]) <= 120:
-            title = lines[0]
-        summary_text = " ".join(lines[:4])[:500]
-    elif report and report.lower().endswith(".pdf"):
-        txt = pdf_text(z.read(report), max_chars=2000)
-        summary_text = txt[:500]
+_SUBSYSTEM_RULES: list[tuple[str, str, str, str, list[str], tuple[str, ...]]] = [
+    ("perception", "Perception & Sensing", "Reads environment sensors and detects obstacles.", "perception", ["lidar"], ("lidar", "scan", "cam", "vision", "detect", "percept", "sensor")),
+    ("localization", "Localization & Mapping", "Estimates vehicle pose and map state.", "localization", ["imu"], ("localiz", "slam", "odom", "ekf", "kalman", "pose", "imu", "map")),
+    ("planning", "Path Planning & Logic", "Computes trajectories and driving decisions.", "planning", ["compute"], ("plan", "route", "logic", "path", "nav", "decision", "patch", "avoid", "traj")),
+    ("control", "Control & Execution", "Drives speed, steering, and simulation execution.", "control", ["compute", "motor"], ("run", "ctrl", "control", "pid", "mpc", "steer", "speed", "motor", "sim", "common", "drive")),
+    ("fleet_coordination", "Fleet Coordination", "Coordinates tasks and multi-vehicle state.", "fleet_coordination", ["wifi"], ("fleet", "coord", "multi", "dispatch", "alloc", "sched", "actor")),
+    ("communication", "Communication & Middleware", "Exchanges messages across nodes.", "communication", ["wifi"], ("comm", "msg", "socket", "net", "bridge", "ros")),
+    ("evaluation_analysis", "Data Logging & Evaluation", "Evaluates metrics and logs experiment runs.", "other", ["compute"], ("analys", "score", "study", "summar", "eval", "metric", "io", "log")),
+]
 
-    code_files = [f["path"] for f in files if not f.get("blocked") and f.get("kind") == "code"][:20]
-    data_files = []
-    for f in files:
-        if f.get("blocked") or f.get("kind") != "data" or not f["path"].lower().endswith(".csv"):
+
+def _infer_param_unit(name: str) -> str | None:
+    low = name.lower()
+    if low.endswith(("_hz", "freq", "rate")):
+        return "Hz"
+    if low.endswith(("_mps", "speed", "vel")):
+        return "m/s"
+    if low.endswith(("_ms",)):
+        return "ms"
+    if low.endswith(("_sec", "_s", "_dt", "timeout", "horizon")):
+        return "s"
+    if low.endswith(("_deg", "angle")):
+        return "deg"
+    if low.endswith(("_m", "_dist", "_radius", "width", "length")):
+        return "m"
+    return None
+
+
+def _parse_report_pages(z: zipfile.ZipFile, report: str | None) -> list[tuple[int, str]]:
+    if not report:
+        return []
+    try:
+        raw = z.read(report)
+    except Exception:  # noqa: BLE001
+        return []
+    low = report.lower()
+    if low.endswith(".docx"):
+        txt = docx_text(raw)
+        return [(1, txt)] if _is_clean_text_chunk(txt) else []
+    if low.endswith(".pdf"):
+        txt = pdf_text(raw, max_chars=80_000)
+        if not txt:
+            return []
+        markers = list(re.finditer(r"\[Page (\d+)\]\n", txt))
+        if not markers:
+            return [(1, txt)]
+        pages: list[tuple[int, str]] = []
+        for idx, m in enumerate(markers):
+            start = m.end()
+            end = markers[idx + 1].start() if idx + 1 < len(markers) else len(txt)
+            body = txt[start:end].strip()
+            if body:
+                pages.append((int(m.group(1)), body))
+        return pages
+    return []
+
+
+def _pick_title(pages: list[tuple[int, str]], report: str | None) -> str:
+    fallback = PurePosixPath(report).stem.replace("_", " ").replace("-", " ").strip() if report else "Engineering Project"
+    if len(fallback) < 2:
+        fallback = "Engineering Project"
+    if pages:
+        for ln in pages[0][1].splitlines()[:14]:
+            s = re.sub(r"\s+", " ", ln).strip()
+            if len(s) < 6 or len(s) > 110:
+                continue
+            if re.match(r"^(?:page\s+\d+|table of contents|\d+[./-]\d+|figure\s+\d+|table\s+\d+|contents$)", s, re.I):
+                continue
+            if _is_clean_text_chunk(s) and len(re.findall(r"[A-Za-z]{3,}", s)) >= 2:
+                return s
+    return fallback
+
+
+def _split_sections(pages: list[tuple[int, str]]) -> dict[str, tuple[str, int]]:
+    heading_map = [
+        ("abstract", re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+)?(abstract|executive\s+summary|summary|overview)\b[:.\-\s]*$", re.I)),
+        ("problem", re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+)?(problem\s+statement|introduction|background|motivation|challenge)\b[:.\-\s]*$", re.I)),
+        ("objectives", re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+)?(objectives?|goals?|aims?|requirements?|design\s+requirements?)\b[:.\-\s]*$", re.I)),
+        ("results", re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+)?(results?|experimental\s+results?|evaluation|discussion|findings?)\b[:.\-\s]*$", re.I)),
+        ("limitations", re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+)?(limitations?|constraints?|known\s+issues?|shortcomings?)\b[:.\-\s]*$", re.I)),
+        ("future_work", re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+)?(future\s+work|recommendations?|next\s+steps|conclusions?\s*(?:&|and)\s*future\s+work)\b[:.\-\s]*$", re.I)),
+    ]
+    sections: dict[str, tuple[list[str], int]] = {}
+    cur_key: str | None = None
+    cur_page = 1
+    for pno, body in pages:
+        for raw_line in body.splitlines():
+            line = re.sub(r"\s+", " ", raw_line).strip()
+            if not line:
+                continue
+            matched = None
+            if len(line) <= 70:
+                for key, pat in heading_map:
+                    if pat.match(line):
+                        matched = key
+                        break
+                if not matched and re.match(r"^(?:\d+(?:\.\d+)*\.?\s+)?[A-Z][A-Za-z &/\-]{3,45}$", line) and not line.endswith("."):
+                    cur_key = None
+                    continue
+            if matched:
+                cur_key = matched
+                cur_page = pno
+                sections.setdefault(cur_key, ([], cur_page))
+                continue
+            if cur_key and _is_clean_text_chunk(line):
+                sections[cur_key][0].append(line)
+    return {k: ("\n".join(v[0]).strip(), v[1]) for k, v in sections.items() if v[0]}
+
+
+def _first_clean_paragraph(pages: list[tuple[int, str]], max_chars: int = 420) -> str | None:
+    paras: list[str] = []
+    for _, body in pages[:3]:
+        for line in body.splitlines():
+            s = re.sub(r"\s+", " ", line).strip()
+            if len(s) >= 28 and _is_clean_text_chunk(s) and not re.match(r"^(?:page\s+\d+|figure\s+\d+|table\s+\d+|\d+\s*$)", s, re.I):
+                paras.append(s)
+            if sum(len(x) for x in paras) >= max_chars:
+                break
+        if paras:
+            break
+    joined = re.sub(r"\s+", " ", " ".join(paras)).strip()
+    if len(joined) > max_chars:
+        cut = joined[:max_chars].rsplit(" ", 1)[0]
+        joined = cut + "…"
+    return joined or None
+
+
+def _extract_bullets(text: str, limit: int = 6) -> list[str]:
+    items: list[str] = []
+    for raw in text.splitlines():
+        s = re.sub(r"^(?:[-*•▪●]|\(?\d+[.)])\s*", "", raw.strip())
+        s = re.sub(r"\s+", " ", s).strip()
+        if 12 <= len(s) <= 220 and _is_clean_text_chunk(s):
+            items.append(s)
+        if len(items) >= limit:
+            break
+    if not items and text:
+        for sent in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", text)):
+            s = sent.strip()
+            if 15 <= len(s) <= 200 and _is_clean_text_chunk(s):
+                items.append(s)
+            if len(items) >= limit:
+                break
+    return items
+
+
+def _inspect_code_subsystems(z: zipfile.ZipFile, files: list[dict]) -> tuple[list[dict], list[dict], list[str], dict[str, str]]:
+    """Build AST-grounded subsystems, parameters, module connections, and software stack."""
+    all_code = [f["path"] for f in files if not f.get("blocked") and f.get("kind") == "code"]
+    runtime_code = [p for p in all_code if not _HELPER_CODE_RE.search(p)] or all_code
+    stack_set: set[str] = set()
+    code_texts: dict[str, str] = {}
+    parsed_info: dict[str, dict] = {}
+
+    for p in runtime_code:
+        low = p.lower()
+        if low.endswith(".py"):
+            stack_set.add("python")
+            try:
+                src = z.read(p).decode("utf-8", "replace")
+            except Exception:  # noqa: BLE001
+                src = ""
+            code_texts[p] = src
+            info = {"doc": "", "params": [], "imports": set()}
+            if len(src) <= 250_000 and src:
+                try:
+                    tree = ast.parse(src)
+                    doc = ast.get_docstring(tree) or ""
+                    if doc:
+                        info["doc"] = re.sub(r"\s+", " ", doc.splitlines()[0]).strip()[:220]
+                    for node in tree.body:
+                        if isinstance(node, ast.Import):
+                            for alias in node.names:
+                                info["imports"].add(alias.name.split(".")[0])
+                        elif isinstance(node, ast.ImportFrom) and node.module:
+                            info["imports"].add(node.module.split(".")[0])
+                        elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                            name = node.targets[0].id
+                            val_node = node.value
+                            if not name.startswith("_") and isinstance(val_node, ast.Constant) and isinstance(val_node.value, (int, float)) and not isinstance(val_node.value, bool):
+                                info["params"].append({
+                                    "name": name,
+                                    "value": float(val_node.value),
+                                    "unit": _infer_param_unit(name),
+                                    "source_ref": p,
+                                    "status": "extracted",
+                                })
+                except SyntaxError:
+                    pass
+            if any(lib in info["imports"] for lib in ("rclpy", "rospy", "sensor_msgs", "geometry_msgs")):
+                stack_set.add("ros2")
+            parsed_info[p] = info
+        elif low.endswith((".m", ".slx", ".mdl")):
+            stack_set.add("matlab_simulink")
+        elif low.endswith((".cpp", ".c", ".hpp", ".h", ".js", ".ts")):
+            stack_set.add("other")
+
+    buckets: dict[str, dict] = {}
+    stem_to_sub: dict[str, str] = {}
+    for p in runtime_code[:40]:
+        stem = PurePosixPath(p).stem.lower()
+        doc = (parsed_info.get(p) or {}).get("doc", "").lower()
+        hay = f"{p.lower()} {doc}"
+        chosen = ("main_system", "System Software", "Core project software pipeline.", "other", ["compute"])
+        for sid, sname, splain, scat, son, keywords in _SUBSYSTEM_RULES:
+            if any(k in hay for k in keywords):
+                chosen = (sid, sname, splain, scat, son)
+                break
+        sid, sname, splain, scat, son = chosen
+        if sid not in buckets:
+            buckets[sid] = {
+                "id": sid,
+                "name": sname,
+                "plain": splain,
+                "on": list(son),
+                "category": scat,
+                "docs": [],
+                "parameters": [],
+                "code_files": [],
+            }
+        buckets[sid]["code_files"].append(p)
+        if parsed_info.get(p, {}).get("doc"):
+            buckets[sid]["docs"].append(parsed_info[p]["doc"])
+        for prm in parsed_info.get(p, {}).get("params", []):
+            if len(buckets[sid]["parameters"]) < 6 and prm["name"] not in {x["name"] for x in buckets[sid]["parameters"]}:
+                buckets[sid]["parameters"].append(prm)
+        stem_to_sub[stem] = sid
+
+    if not buckets:
+        buckets["main_system"] = {
+            "id": "main_system",
+            "name": "System Software",
+            "plain": "Main project pipeline.",
+            "on": [],
+            "category": "other",
+            "docs": [],
+            "parameters": [],
+            "code_files": runtime_code[:20],
+        }
+
+    subsystems: list[dict] = []
+    for b in list(buckets.values())[:6]:
+        desc = " ".join(b["docs"][:2]).strip()
+        subsystems.append({
+            "id": b["id"],
+            "name": b["name"],
+            "plain": b["plain"],
+            "on": b["on"],
+            "category": b["category"],
+            "description": desc or f"Implements {b['name'].lower()} across {len(b['code_files'])} code file(s).",
+            "inputs": [],
+            "outputs": [],
+            "method": desc or None,
+            "equations": [],
+            "parameters": b["parameters"],
+            "rate_hz": _tracked_null(),
+            "code_files": b["code_files"][:20],
+            "sim": None,
+        })
+
+    valid_ids = {s["id"] for s in subsystems}
+    connections: list[dict] = []
+    seen_edges: set[tuple[str, str]] = set()
+    for p, info in parsed_info.items():
+        dst_sub = stem_to_sub.get(PurePosixPath(p).stem.lower())
+        if not dst_sub or dst_sub not in valid_ids:
             continue
+        for imp in sorted(info["imports"]):
+            src_sub = stem_to_sub.get(imp.lower())
+            if src_sub and src_sub in valid_ids and src_sub != dst_sub and (src_sub, dst_sub) not in seen_edges:
+                seen_edges.add((src_sub, dst_sub))
+                connections.append({"from": src_sub, "to": dst_sub, "signal": f"{imp} module data"})
+
+    return subsystems, connections[:12], sorted(stack_set), code_texts
+
+
+def _extract_sensors(pages: list[tuple[int, str]], subsystems: list[dict], full_code: str) -> list[dict]:
+    sensor_specs = [
+        ("lidar", re.compile(r"\blidar\b", re.I), "Range scanning and obstacle detection.", ("perception", "localization")),
+        ("depth_camera", re.compile(r"\b(?:depth\s+camera|rgbd|realsense)\b", re.I), "Depth and visual environment sensing.", ("perception",)),
+        ("rgb_camera", re.compile(r"\b(?:rgb\s+camera|csi\s+camera|camera)\b", re.I), "Visual lane and scene capture.", ("perception",)),
+        ("imu", re.compile(r"\bimu\b|inertial\s+measurement", re.I), "Angular rate and acceleration estimation.", ("localization", "control")),
+        ("wheel_encoder", re.compile(r"\b(?:wheel\s+encoder|encoders?|odometry)\b", re.I), "Wheel speed and distance measurement.", ("localization", "control")),
+    ]
+    sub_ids = [s["id"] for s in subsystems]
+    sensors: list[dict] = []
+    for stype, pat, default_purpose, pref_cats in sensor_specs:
+        found_page: int | None = None
+        snippet = ""
+        for pno, body in pages:
+            m = pat.search(body)
+            if m:
+                found_page = pno
+                start = max(0, m.start() - 40)
+                snippet = body[start:m.end() + 80]
+                break
+        if found_page is None and not pat.search(full_code):
+            continue
+        rate = _tracked_null()
+        hm = re.search(r"\b(\d+(?:\.\d+)?)\s*Hz\b", snippet, re.I)
+        if hm and found_page is not None:
+            rate = {"value": float(hm.group(1)), "source_ref": f"p. {found_page}", "status": "extracted"}
+        used = [s["id"] for s in subsystems if s["category"] in pref_cats or s["id"] in pref_cats]
+        sensors.append({
+            "type": stype,
+            "purpose": default_purpose,
+            "rate_hz": rate,
+            "used_by": used or ([sub_ids[0]] if sub_ids else []),
+        })
+    return sensors
+
+
+def _extract_metrics(pages: list[tuple[int, str]]) -> list[dict]:
+    pat = re.compile(r"\b([A-Za-z][A-Za-z0-9 _/\-]{3,38}?)\s*[:=]\s*([-+]?\d+(?:\.\d+)?)\s*(%|ms|sec|s|m/s|cm|m|Hz|deg)?\b")
+    skip = re.compile(r"^(?:page|figure|fig|table|section|step|team|problem|version|appendix|phase)\b", re.I)
+    metrics: list[dict] = []
+    seen: set[str] = set()
+    for pno, body in pages:
+        for m in pat.finditer(body):
+            label = re.sub(r"\s+", " ", m.group(1)).strip(" -_:")
+            if len(label) < 4 or skip.match(label) or not re.search(r"[A-Za-z]{3,}", label):
+                continue
+            val = float(m.group(2))
+            if 1990 <= val <= 2035 and not m.group(3):
+                continue
+            key = label.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            metrics.append({
+                "metric": label,
+                "value": {"value": val, "source_ref": f"p. {pno}", "status": "extracted"},
+                "unit": m.group(3) or None,
+                "conditions": None,
+            })
+            if len(metrics) >= 8:
+                return metrics
+    return metrics
+
+
+def local_rules_extract(zip_bytes: bytes, files: list[dict], report: str | None) -> tuple[dict, dict]:
+    """Rich zero-AI local extractor producing schema-valid project structure from report & AST."""
+    z = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    pages = _parse_report_pages(z, report)
+    full_text = "\n\n".join(body for _, body in pages)
+    title = _pick_title(pages, report)
+    sections = _split_sections(pages)
+
+    short_desc = None
+    if "abstract" in sections:
+        txt = re.sub(r"\s+", " ", sections["abstract"][0]).strip()
+        short_desc = (txt[:417].rsplit(" ", 1)[0] + "…") if len(txt) > 420 else txt
+    if not short_desc:
+        short_desc = _first_clean_paragraph(pages, max_chars=420)
+
+    prob_stmt = None
+    if "problem" in sections:
+        txt = re.sub(r"\s+", " ", sections["problem"][0]).strip()
+        prob_stmt = (txt[:697].rsplit(" ", 1)[0] + "…") if len(txt) > 700 else txt
+    elif short_desc:
+        prob_stmt = short_desc
+
+    objectives = _extract_bullets(sections["objectives"][0], limit=6) if "objectives" in sections else []
+    limitations = _extract_bullets(sections["limitations"][0], limit=5) if "limitations" in sections else []
+    future_work = _extract_bullets(sections["future_work"][0], limit=5) if "future_work" in sections else []
+
+    subsystems, connections, software_stack, code_texts = _inspect_code_subsystems(z, files)
+    full_code = "\n".join(code_texts.values())
+    combined = f"{full_text}\n{full_code}"
+
+    # Platform & environment signals.
+    has_qlabs = bool(re.search(r"\bqlabs\b|\bsimulat", combined, re.I))
+    has_phys = bool(re.search(r"\bphysical\s+qcar|\breal\s+qcar|\bphysical\s+track\b", combined, re.I))
+    plat_mode = "both" if (has_qlabs and has_phys) else ("qlabs_sim" if has_qlabs else ("physical_qcar2" if has_phys else None))
+
+    veh_count = _tracked_null()
+    for pno, body in pages:
+        vm = re.search(r"\b([1-9]\d?)\s+(?:qcars?|vehicles?|robots?|actors?)\b", body, re.I)
+        if vm:
+            n_val = int(vm.group(1))
+            if 1 <= n_val <= 20:
+                veh_count = {"value": n_val, "source_ref": f"p. {pno}", "status": "extracted"}
+                break
+
+    has_dyn = bool(re.search(r"\bdynamic\s+obstacles?\b", full_text, re.I))
+    has_stat = bool(re.search(r"\bstatic\s+obstacles?\b", full_text, re.I))
+    obstacles = "both" if (has_dyn and has_stat) else ("dynamic" if has_dyn else ("static" if has_stat else None))
+    map_source = "qlabs_builtin" if has_qlabs else ("physical_track" if has_phys else None)
+
+    kw_candidates = [
+        ("LiDAR", r"\blidar\b"),
+        ("Autonomous Vehicle", r"\bautonomous\b"),
+        ("Obstacle Avoidance", r"\bobstacle\s+avoid"),
+        ("Path Planning", r"\bpath\s+plan|\broute\b"),
+        ("QCar 2", r"\bqcar"),
+        ("QLabs", r"\bqlabs\b"),
+        ("ROS 2", r"\bros\s*2\b|\brclpy\b"),
+        ("Simulation", r"\bsimulat"),
+    ]
+    keywords = [label for label, pat in kw_candidates if re.search(pat, combined, re.I)][:8]
+
+    sensors = _extract_sensors(pages, subsystems, full_code)
+    metrics = _extract_metrics(pages)
+
+    # Prioritize summary/calibration/results CSVs and always satisfy schema format="csv".
+    csv_candidates = [f for f in files if not f.get("blocked") and f.get("kind") == "data" and f["path"].lower().endswith(".csv")]
+
+    def csv_rank(item: dict) -> tuple[int, str]:
+        low = PurePosixPath(item["path"]).name.lower()
+        score = 0
+        if any(k in low for k in ("summary", "result", "metric", "score", "run", "block", "calib", "eval")):
+            score -= 20
+        if "frame" in low or "raw" in low:
+            score += 10
+        return (score, low)
+
+    default_sub = subsystems[0]["id"]
+    data_files = []
+    for f in sorted(csv_candidates, key=csv_rank):
         cols = []
         try:
             with z.open(f["path"]) as fh:
                 first = fh.read(2048).decode("utf-8", "replace").splitlines()[0]
-                for c in [x.strip().strip('"') for x in first.split(",") if x.strip()][:4]:
-                    cols.append({"name": c, "unit": None})
+                for c in [x.strip().strip('"') for x in first.split(",") if x.strip()][:6]:
+                    cols.append({"name": c, "unit": _infer_param_unit(c)})
         except Exception:  # noqa: BLE001
             pass
+        low_name = PurePosixPath(f["path"]).name.lower()
+        sub_match = next((s["id"] for s in subsystems if s["id"].split("_")[0] in low_name), default_sub)
         data_files.append({
             "file": PurePosixPath(f["path"]).name,
             "description": None,
-            "subsystem": "main_system",
+            "subsystem": sub_match,
+            "format": "csv",
+            "sample_rate_hz": _tracked_null(),
             "columns": cols,
         })
         if len(data_files) >= 10:
             break
 
+    fig_captions: list[str] = [
+        re.sub(r"\s+", " ", m.group(1)).strip()
+        for m in re.finditer(r"(?im)^fig(?:ure)?\.?\s*\d+[:.\-\s]+([^\n]{6,180})", full_text)
+        if _is_clean_text_chunk(m.group(1))
+    ]
+    media_candidates = [
+        f for f in files
+        if not f.get("blocked") and (f.get("kind") in ("image", "video") or f["path"].lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".mov")))
+    ]
+
+    def media_rank(item: dict) -> tuple[int, str]:
+        low = PurePosixPath(item["path"]).name.lower()
+        score = 0
+        if any(k in low for k in ("panel", "calib", "summary", "demo", "fig", "plot", "result", "overview", "g1", "g2")):
+            score -= 20
+        if "frame" in low or re.search(r"_\d{4,}\.", low):
+            score += 20
+        return (score, low)
+
     media = []
-    for f in files:
-        if f.get("blocked"):
-            continue
-        p = f["path"].lower()
-        if f.get("kind") == "image" or p.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
-            media.append({"file": PurePosixPath(f["path"]).name, "caption": None, "type": "image", "part": None})
-        elif f.get("kind") == "video" or p.endswith((".mp4", ".webm", ".mov")):
-            media.append({"file": PurePosixPath(f["path"]).name, "caption": None, "type": "video", "part": None})
+    for idx, f in enumerate(sorted(media_candidates, key=media_rank)):
+        base = PurePosixPath(f["path"]).name
+        low_base = base.lower()
+        stem_caption = PurePosixPath(base).stem.replace("_", " ").replace("-", " ").strip().title()
+        caption = fig_captions[idx] if idx < len(fig_captions) else stem_caption
+        part = next((s["id"] for s in subsystems if s["id"].split("_")[0] in low_base), None)
+        media.append({
+            "file": base,
+            "caption": caption or None,
+            "part": part,
+        })
         if len(media) >= 15:
             break
 
@@ -397,52 +864,35 @@ def local_rules_extract(zip_bytes: bytes, files: list[dict], report: str | None)
             "title": title,
             "question": None,
             "headline": None,
-            "short_description": summary_text or "Extracted locally without an LLM. Review and complete the subsystems and results below.",
+            "short_description": short_desc or "Extracted locally without an LLM. Review and complete any missing details below.",
             "platform": {
-                "mode": None,
-                "vehicle_count": _tracked_null(),
-                "software_stack": [],
+                "mode": plat_mode,
+                "vehicle_count": veh_count,
+                "software_stack": software_stack,
             },
-            "keywords": [],
+            "keywords": keywords,
         },
         "goal": {
-            "problem_statement": summary_text or None,
-            "objectives": [],
+            "problem_statement": prob_stmt,
+            "objectives": objectives,
             "success_criteria": [],
         },
         "environment": {
             "scenario": None,
-            "map_source": None,
+            "map_source": map_source,
             "map_file": None,
-            "obstacles": None,
+            "obstacles": obstacles,
             "other_agents": None,
         },
-        "sensors": [],
-        "subsystems": [
-            {
-                "id": "main_system",
-                "name": "System software",
-                "plain": "Main project pipeline.",
-                "on": [],
-                "category": "other",
-                "description": "Placeholder subsystem created by local fallback extractor; break down or rename in the editor.",
-                "inputs": [],
-                "outputs": [],
-                "method": None,
-                "equations": [],
-                "parameters": [],
-                "rate_hz": _tracked_null(),
-                "code_files": code_files,
-                "sim": None,
-            }
-        ],
-        "connections": [],
+        "sensors": sensors,
+        "subsystems": subsystems,
+        "connections": connections,
         "data_files": data_files,
         "results": {
-            "metrics": [],
+            "metrics": metrics,
             "media": media,
-            "limitations": [],
-            "future_work": [],
+            "limitations": limitations,
+            "future_work": future_work,
         },
     }
     meta = {"model": "local_rules", "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0}}

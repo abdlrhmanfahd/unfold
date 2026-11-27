@@ -114,4 +114,13 @@ final class AiConfigTest extends TestCase {
 		$this->assertSame( 'gemini-2.5-pro', $b['model'] );
 		$this->assertSame( 'demo-student-value-7777', $b['api_key'] );
 	}
+
+	public function test_curated_models_and_fetch_models_fallback(): void {
+		$this->assertArrayHasKey( 'gemini', Unfold_AI::CURATED_MODELS );
+		$this->assertArrayHasKey( 'openai_compat', Unfold_AI::CURATED_MODELS );
+
+		$res = Unfold_AI::fetch_models( 'gemini', '', '' );
+		$this->assertFalse( $res['live'] );
+		$this->assertSame( Unfold_AI::CURATED_MODELS['gemini'], $res['models'] );
+	}
 }

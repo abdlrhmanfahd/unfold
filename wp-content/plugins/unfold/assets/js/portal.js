@@ -26,8 +26,8 @@
 
 	function mountAi( host ) {
 		if ( ! host ) return null;
-		var aiCfg = C.ai || { presets: [], user: {}, defaults: {} };
-		var presets = aiCfg.presets || [], u = aiCfg.user || {}, defs = aiCfg.defaults || {};
+		var aiCfg = C.ai || { presets: [], user: {}, defaults: {}, models: {} };
+		var presets = aiCfg.presets || [], u = aiCfg.user || {}, defs = aiCfg.defaults || {}, curated = aiCfg.models || {};
 		var activeVal = 'quick';
 		if ( u.mode === 'preset' && presets.some( function ( p ) { return p.id === u.preset_id; } ) ) activeVal = 'preset:' + u.preset_id;
 		else if ( u.mode === 'byok' ) activeVal = 'byok';
@@ -38,14 +38,18 @@
 				+ '<span><strong>' + esc( p.label ) + '</strong><small>' + esc( p.provider + ' · ' + p.model ) + '</small></span></label>';
 		} ).join( '' )
 		+ '<label class="uf-ai-opt"><input type="radio" name="uf_ai_mode" value="byok"' + ( activeVal === 'byok' ? ' checked' : '' ) + '>'
-			+ '<span><strong>Use my own API key (saved to my account)</strong><small>Gemini (free tier), Groq, OpenRouter, OpenAI, Ollama, or Anthropic — stored encrypted on your account.</small></span></label>'
+			+ '<span><strong>Use my own API key (saved to my account)</strong><small>Paste a Gemini, Groq, OpenRouter, OpenAI, or Anthropic key — provider &amp; available models are detected automatically.</small></span></label>'
 		+ '<label class="uf-ai-opt"><input type="radio" name="uf_ai_mode" value="quick"' + ( activeVal === 'quick' ? ' checked' : '' ) + '>'
-			+ '<span><strong>Quick Extract (No AI — instant)</strong><small>Extracts title, summary, code files, CSV columns, images &amp; videos right away without an API key.</small></span></label>';
+			+ '<span><strong>Quick Extract (No AI — instant)</strong><small>Parses the report sections, subsystems, code parameters, CSV columns, metrics &amp; figures cleanly without an API key.</small></span></label>';
 
 		var prov = u.provider || 'gemini';
+		var initModel = u.model || defs[ prov ] || '';
 		host.innerHTML = '<p class="uf-ai-title">Extraction method</p>'
 			+ '<div class="uf-ai-modes">' + radios + '</div>'
 			+ '<div class="uf-ai-byok" data-uf-ai-byok' + ( activeVal === 'byok' ? '' : ' hidden' ) + '>'
+			+ '<label class="uf-field"><span>API Key <small>(paste your key first to auto-detect provider &amp; load models)</small></span>'
+			+ '<input type="password" autocomplete="new-password" data-uf-ai-key placeholder="' + esc( u.has_key ? 'Saved (…' + ( u.key_hint || '****' ) + ') — leave blank to keep' : 'Paste your API key (AIza…, gsk_…, sk-or-…, sk-…)' ) + '" value="">'
+			+ '<span class="uf-ai-status" data-uf-ai-status' + ( u.has_key ? '' : ' hidden' ) + '>Saved on your account (…' + esc( u.key_hint || '****' ) + ')</span></label>'
 			+ '<div class="uf-field-row">'
 			+ '<label class="uf-field"><span>Provider</span><select data-uf-ai-provider>'
 				+ '<option value="gemini"' + ( prov === 'gemini' ? ' selected' : '' ) + '>Google Gemini (AI Studio Free / Paid)</option>'
@@ -53,12 +57,12 @@
 				+ '<option value="ollama"' + ( prov === 'ollama' ? ' selected' : '' ) + '>Ollama (Local Server)</option>'
 				+ '<option value="anthropic"' + ( prov === 'anthropic' ? ' selected' : '' ) + '>Anthropic (Claude)</option>'
 			+ '</select></label>'
-			+ '<label class="uf-field"><span>Model</span><input type="text" data-uf-ai-model value="' + esc( u.model || defs[ prov ] || '' ) + '"></label>'
+			+ '<label class="uf-field"><span>Model</span><select data-uf-ai-model-select></select>'
+			+ '<input type="text" data-uf-ai-model-custom placeholder="Enter custom model ID" value="" hidden></label>'
 			+ '</div>'
 			+ '<label class="uf-field" data-uf-ai-url-row' + ( prov === 'openai_compat' || prov === 'ollama' ? '' : ' hidden' ) + '><span>Base URL</span><input type="url" data-uf-ai-url placeholder="https://api.groq.com/openai/v1" value="' + esc( u.base_url || '' ) + '"></label>'
-			+ '<label class="uf-field"><span>API Key</span><input type="password" autocomplete="new-password" data-uf-ai-key placeholder="' + esc( u.has_key ? 'Saved (…' + ( u.key_hint || '****' ) + ') — leave blank to keep' : 'Paste your API key' ) + '" value="">'
-			+ '<span class="uf-ai-status" data-uf-ai-status' + ( u.has_key ? '' : ' hidden' ) + '>Saved on your account (…' + esc( u.key_hint || '****' ) + ')</span></label>'
 			+ '<div class="uf-actions" style="margin-top:0!important">'
+			+ '<button type="button" class="uf-btn uf-btn--ghost" data-uf-ai-refresh>Refresh models</button>'
 			+ '<button type="button" class="uf-btn uf-btn--ghost" data-uf-ai-save>Save AI settings</button>'
 			+ '<button type="button" class="uf-btn uf-btn--ghost" data-uf-ai-clear' + ( u.has_key ? '' : ' hidden' ) + '>Clear saved key</button>'
 			+ '</div>'
@@ -67,14 +71,79 @@
 
 		var byokBox = host.querySelector( '[data-uf-ai-byok]' ),
 			provEl = host.querySelector( '[data-uf-ai-provider]' ),
-			modelEl = host.querySelector( '[data-uf-ai-model]' ),
+			modelSel = host.querySelector( '[data-uf-ai-model-select]' ),
+			modelCustom = host.querySelector( '[data-uf-ai-model-custom]' ),
 			urlRow = host.querySelector( '[data-uf-ai-url-row]' ),
 			urlEl = host.querySelector( '[data-uf-ai-url]' ),
 			keyEl = host.querySelector( '[data-uf-ai-key]' ),
 			statusEl = host.querySelector( '[data-uf-ai-status]' ),
 			clearBtn = host.querySelector( '[data-uf-ai-clear]' ),
 			msgEl = host.querySelector( '[data-uf-ai-msg]' );
-		var lastProv = provEl.value;
+		var fetchT = null;
+
+		function populateModels( list, desired ) {
+			var items = ( list && list.length ) ? list.slice() : ( curated[ provEl.value ] || [] ).slice();
+			if ( desired && items.indexOf( desired ) === -1 && desired !== '__custom__' ) items.unshift( desired );
+			modelSel.innerHTML = items.map( function ( m ) {
+				return '<option value="' + esc( m ) + '">' + esc( m ) + '</option>';
+			} ).join( '' ) + '<option value="__custom__">Other (custom model)…</option>';
+			if ( desired && items.indexOf( desired ) !== -1 ) {
+				modelSel.value = desired;
+				modelCustom.hidden = true;
+			} else if ( desired ) {
+				modelSel.value = '__custom__';
+				modelCustom.value = desired;
+				modelCustom.hidden = false;
+			} else if ( items.length ) {
+				modelSel.value = items[ 0 ];
+				modelCustom.hidden = true;
+			}
+		}
+
+		function currentModel() {
+			return modelSel.value === '__custom__' ? modelCustom.value.trim() : modelSel.value;
+		}
+
+		function syncUrlVisibility( nextProv ) {
+			urlRow.hidden = nextProv !== 'openai_compat' && nextProv !== 'ollama';
+			if ( nextProv === 'openai_compat' && ( ! urlEl.value.trim() || urlEl.value.indexOf( '11434' ) !== -1 ) ) urlEl.value = 'https://api.groq.com/openai/v1';
+			if ( nextProv === 'ollama' && ( ! urlEl.value.trim() || urlEl.value.indexOf( 'groq.com' ) !== -1 ) ) urlEl.value = 'http://127.0.0.1:11434';
+		}
+
+		function detectFromKey( rawKey ) {
+			var k = rawKey.trim();
+			if ( ! k ) return null;
+			if ( k.indexOf( 'AIza' ) === 0 ) return { provider: 'gemini', label: 'Google Gemini', base_url: '', model: 'gemini-2.5-flash' };
+			if ( k.indexOf( 'gsk_' ) === 0 ) return { provider: 'openai_compat', label: 'Groq', base_url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' };
+			if ( k.indexOf( 'sk-or-' ) === 0 ) return { provider: 'openai_compat', label: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', model: 'google/gemini-2.0-flash-exp:free' };
+			if ( k.indexOf( 'sk-ant-' ) === 0 ) return { provider: 'anthropic', label: 'Anthropic', base_url: '', model: 'claude-sonnet-4-6' };
+			if ( k.indexOf( 'sk-' ) === 0 && k.length >= 20 ) return { provider: 'openai_compat', label: 'OpenAI', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' };
+			return null;
+		}
+
+		function loadAvailableModels( preferred, detectedLabel ) {
+			msgEl.textContent = detectedLabel ? ( 'Detected ' + detectedLabel + ' key — loading available models…' ) : 'Loading models…';
+			api( 'POST', '/me/ai/models', {
+				provider: provEl.value,
+				base_url: urlEl.value.trim(),
+				api_key: keyEl.value.trim(),
+			} ).then( function ( res ) {
+				var models = ( res && res.models ) || [];
+				populateModels( models, preferred || ( models[ 0 ] || '' ) );
+				if ( res && res.live ) {
+					msgEl.textContent = ( detectedLabel ? 'Detected ' + detectedLabel + ' · ' : '' ) + 'Loaded ' + models.length + ' live models from your key.';
+				} else if ( detectedLabel ) {
+					msgEl.textContent = 'Detected ' + detectedLabel + ' (using default model list).';
+				} else {
+					msgEl.textContent = ( res && res.error ) ? ( 'Using default models (' + res.error + ').' ) : '';
+				}
+			} ).catch( function () {
+				populateModels( curated[ provEl.value ] || [], preferred );
+				msgEl.textContent = detectedLabel ? ( 'Detected ' + detectedLabel + '.' ) : '';
+			} );
+		}
+
+		populateModels( curated[ prov ] || [], initModel );
 
 		function selected() {
 			var r = host.querySelector( 'input[name="uf_ai_mode"]:checked' );
@@ -88,7 +157,7 @@
 				mode: mode,
 				preset_id: val.indexOf( 'preset:' ) === 0 ? val.slice( 7 ) : '',
 				provider: provEl.value,
-				model: modelEl.value.trim(),
+				model: currentModel(),
 				base_url: urlEl.value.trim(),
 			};
 			if ( includeKey !== false && keyEl.value.trim() ) out.api_key = keyEl.value.trim();
@@ -98,7 +167,7 @@
 		function applyUserState( next ) {
 			aiCfg.user = next;
 			keyEl.value = '';
-			keyEl.placeholder = next.has_key ? 'Saved (…' + ( next.key_hint || '****' ) + ') — leave blank to keep' : 'Paste your API key';
+			keyEl.placeholder = next.has_key ? 'Saved (…' + ( next.key_hint || '****' ) + ') — leave blank to keep' : 'Paste your API key (AIza…, gsk_…, sk-or-…, sk-…)';
 			statusEl.hidden = ! next.has_key;
 			statusEl.textContent = next.has_key ? 'Saved on your account (…' + ( next.key_hint || '****' ) + ')' : '';
 			clearBtn.hidden = ! next.has_key;
@@ -114,11 +183,35 @@
 
 		provEl.addEventListener( 'change', function () {
 			var next = provEl.value;
-			urlRow.hidden = next !== 'openai_compat' && next !== 'ollama';
-			if ( ! modelEl.value.trim() || modelEl.value.trim() === ( defs[ lastProv ] || '' ) ) modelEl.value = defs[ next ] || '';
-			if ( next === 'openai_compat' && ( ! urlEl.value.trim() || urlEl.value.indexOf( '11434' ) !== -1 ) ) urlEl.value = 'https://api.groq.com/openai/v1';
-			if ( next === 'ollama' && ( ! urlEl.value.trim() || urlEl.value.indexOf( 'groq.com' ) !== -1 ) ) urlEl.value = 'http://127.0.0.1:11434';
-			lastProv = next;
+			syncUrlVisibility( next );
+			populateModels( curated[ next ] || [], defs[ next ] || '' );
+			if ( keyEl.value.trim() || u.has_key || next === 'ollama' ) loadAvailableModels( defs[ next ] || '', '' );
+		} );
+
+		modelSel.addEventListener( 'change', function () {
+			modelCustom.hidden = modelSel.value !== '__custom__';
+			if ( ! modelCustom.hidden ) modelCustom.focus();
+		} );
+
+		keyEl.addEventListener( 'input', function () {
+			clearTimeout( fetchT );
+			var det = detectFromKey( keyEl.value );
+			if ( det ) {
+				provEl.value = det.provider;
+				if ( det.base_url ) urlEl.value = det.base_url;
+				syncUrlVisibility( det.provider );
+				populateModels( curated[ det.provider ] || [], det.model );
+			}
+			var raw = keyEl.value.trim();
+			if ( raw.length >= 16 ) {
+				fetchT = setTimeout( function () {
+					loadAvailableModels( det ? det.model : currentModel(), det ? det.label : '' );
+				}, 350 );
+			}
+		} );
+
+		host.querySelector( '[data-uf-ai-refresh]' ).addEventListener( 'click', function () {
+			loadAvailableModels( currentModel(), '' );
 		} );
 
 		host.querySelector( '[data-uf-ai-save]' ).addEventListener( 'click', function () {
