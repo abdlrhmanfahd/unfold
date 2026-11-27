@@ -16,9 +16,12 @@ defined( 'ABSPATH' ) || exit;
 
 class Unfold_Accounts {
 
-	const CAP_SUBMIT = 'unfold_submit';
-	const CAP_REVIEW = 'unfold_review';
-	const VERIFY_TTL = 2 * DAY_IN_SECONDS;
+	const CAP_SUBMIT       = 'unfold_submit';
+	const CAP_REVIEW       = 'unfold_review';
+	const VERIFY_TTL       = 2 * DAY_IN_SECONDS;
+	const OTP_TTL          = 15 * MINUTE_IN_SECONDS;
+	const OTP_MAX_ATTEMPTS = 5;
+	const DEFAULT_DOMAINS  = array( 'kau.edu.sa', 'stu.kau.edu.sa' );
 
 	public static function init() {
 		add_action( 'init', array( __CLASS__, 'maybe_install_roles' ) );
@@ -34,26 +37,57 @@ class Unfold_Accounts {
 	}
 
 	/**
-	 * Send mail through an SMTP service (e.g. Brevo, 300 emails/day free) when the
-	 * administrator adds these lines to wp-config.php. Without them WordPress' default mail is used.
-	 *   define( 'UNFOLD_SMTP_HOST', 'smtp-relay.brevo.com' );
-	 *   define( 'UNFOLD_SMTP_USER', '...' );      // Brevo SMTP login
-	 *   define( 'UNFOLD_SMTP_PASS', '...' );      // Brevo SMTP key
-	 *   define( 'UNFOLD_SMTP_FROM', 'no-reply@your-domain' );
+	 * Resolve SMTP settings from wp-config.php constants first, then wp-admin Settings options.
+	 * Works with university Office 365 / Exchange, Gmail Workspace, or an internal lab relay.
 	 */
+	public static function smtp_config() {
+		$host   = defined( 'UNFOLD_SMTP_HOST' ) ? (string) UNFOLD_SMTP_HOST : (string) get_option( 'unfold_smtp_host', '' );
+		$port   = defined( 'UNFOLD_SMTP_PORT' ) ? (int) UNFOLD_SMTP_PORT : (int) get_option( 'unfold_smtp_port', 587 );
+		$user   = defined( 'UNFOLD_SMTP_USER' ) ? (string) UNFOLD_SMTP_USER : (string) get_option( 'unfold_smtp_user', '' );
+		$pass   = defined( 'UNFOLD_SMTP_PASS' ) ? (string) UNFOLD_SMTP_PASS : (string) get_option( 'unfold_smtp_pass', '' );
+		$from   = defined( 'UNFOLD_SMTP_FROM' ) ? (string) UNFOLD_SMTP_FROM : (string) get_option( 'unfold_smtp_from', '' );
+		$secure = defined( 'UNFOLD_SMTP_SECURE' ) ? strtolower( (string) UNFOLD_SMTP_SECURE ) : strtolower( (string) get_option( 'unfold_smtp_secure', 'tls' ) );
+		if ( ! in_array( $secure, array( 'tls', 'ssl', 'none' ), true ) ) {
+			$secure = 'tls';
+		}
+		return array(
+			'host'       => trim( $host ),
+			'port'       => $port > 0 ? $port : 587,
+			'user'       => trim( $user ),
+			'pass'       => $pass,
+			'from'       => trim( $from ),
+			'secure'     => $secure,
+			'configured' => '' !== trim( $host ) && ( '' === trim( $user ) || '' !== $pass ),
+		);
+	}
+
+	/** Configure PHPMailer for generic SMTP when configured (constants or Settings). */
 	public static function smtp( $mailer ) {
-		if ( ! defined( 'UNFOLD_SMTP_HOST' ) || ! defined( 'UNFOLD_SMTP_USER' ) || ! defined( 'UNFOLD_SMTP_PASS' ) ) {
+		$cfg = self::smtp_config();
+		if ( '' === $cfg['host'] ) {
+			return;
+		}
+		if ( '' !== $cfg['user'] && '' === $cfg['pass'] ) {
 			return;
 		}
 		$mailer->isSMTP();
-		$mailer->Host       = UNFOLD_SMTP_HOST;
-		$mailer->Port       = defined( 'UNFOLD_SMTP_PORT' ) ? (int) UNFOLD_SMTP_PORT : 587;
-		$mailer->SMTPAuth   = true;
-		$mailer->SMTPSecure = 'tls';
-		$mailer->Username   = UNFOLD_SMTP_USER;
-		$mailer->Password   = UNFOLD_SMTP_PASS;
-		if ( defined( 'UNFOLD_SMTP_FROM' ) ) {
-			$mailer->setFrom( UNFOLD_SMTP_FROM, wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES ), false );
+		$mailer->Host = $cfg['host'];
+		$mailer->Port = $cfg['port'];
+		if ( 'none' === $cfg['secure'] ) {
+			$mailer->SMTPSecure  = '';
+			$mailer->SMTPAutoTLS = false;
+		} else {
+			$mailer->SMTPSecure = $cfg['secure'];
+		}
+		if ( '' !== $cfg['user'] ) {
+			$mailer->SMTPAuth = true;
+			$mailer->Username = $cfg['user'];
+			$mailer->Password = $cfg['pass'];
+		} else {
+			$mailer->SMTPAuth = false;
+		}
+		if ( '' !== $cfg['from'] && is_email( $cfg['from'] ) ) {
+			$mailer->setFrom( $cfg['from'], wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES ), false );
 		}
 	}
 
@@ -114,7 +148,7 @@ class Unfold_Accounts {
 	 * Email rule and confirmation
 	 * ------------------------------------------------------------------ */
 
-	/** @return string[] lower-case domains set by the administrator; empty = any email. */
+	/** @return string[] lower-case domains set by the administrator, defaulting to KAU domains. */
 	public static function allowed_domains() {
 		$out = array();
 		foreach ( preg_split( '/[\s,]+/', strtolower( (string) get_option( 'unfold_allowed_domains', '' ) ) ) as $d ) {
@@ -123,13 +157,18 @@ class Unfold_Accounts {
 				$out[] = $d;
 			}
 		}
-		return array_values( array_unique( $out ) );
+		return $out ? array_values( array_unique( $out ) ) : self::DEFAULT_DOMAINS;
 	}
 
 	public static function email_allowed( $email ) {
+		$email = trim( (string) $email );
+		if ( ! filter_var( $email, FILTER_VALIDATE_EMAIL ) ) {
+			return false;
+		}
 		$allowed = self::allowed_domains();
-		$domain  = strtolower( substr( strrchr( (string) $email, '@' ), 1 ) );
-		return ! $allowed || ( $domain && in_array( $domain, $allowed, true ) );
+		$at      = strrchr( $email, '@' );
+		$domain  = $at ? strtolower( substr( $at, 1 ) ) : '';
+		return '' !== $domain && in_array( $domain, $allowed, true );
 	}
 
 	public static function is_unverified( $user_id ) {
@@ -139,7 +178,7 @@ class Unfold_Accounts {
 	/** Blocks sign-in until the email is confirmed (accounts made by the admin are not affected). */
 	public static function block_unverified( $user, $password = '' ) {
 		if ( $user instanceof WP_User && self::is_unverified( $user->ID ) && wp_check_password( (string) $password, $user->user_pass, $user->ID ) ) {
-			return new WP_Error( 'unfold_unverified', __( 'Confirm your email first: open the link we sent you.', 'unfold' ) );
+			return new WP_Error( 'unfold_unverified', __( 'Confirm your email first: open the link or enter the 6-digit code we sent you.', 'unfold' ) );
 		}
 		return $user;
 	}
@@ -147,12 +186,30 @@ class Unfold_Accounts {
 	private static function send_verification( $user_id ) {
 		$user  = get_userdata( $user_id );
 		$token = wp_generate_password( 32, false, false );
+		$otp   = str_pad( (string) random_int( 0, 999999 ), 6, '0', STR_PAD_LEFT );
 		update_user_meta( $user_id, 'unfold_verify_hash', wp_hash_password( $token ) );
 		update_user_meta( $user_id, 'unfold_verify_expires', time() + self::VERIFY_TTL );
+		update_user_meta( $user_id, 'unfold_otp_hash', wp_hash_password( $otp ) );
+		update_user_meta( $user_id, 'unfold_otp_expires', time() + self::OTP_TTL );
+		update_user_meta( $user_id, 'unfold_otp_attempts', 0 );
 		$link    = add_query_arg( array( 'unfold_verify' => $user_id . '.' . $token ), Unfold_Portals::url( 'login' ) );
 		$site    = wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES );
-		$message = sprintf( __( "Hi %1\$s,\n\nConfirm your email to finish creating your %2\$s account:\n\n%3\$s\n\nThe link works for 48 hours. If you did not sign up, ignore this email.", 'unfold' ), $user->display_name, $site, $link );
+		$message = sprintf(
+			__( "Hi %1\$s,\n\nYour %2\$s verification code is: %3\$s (expires in 15 minutes).\n\nOr confirm your email by opening this link (valid for 48 hours):\n%4\$s\n\nIf you did not sign up, ignore this email.", 'unfold' ),
+			$user->display_name,
+			$site,
+			$otp,
+			$link
+		);
 		return wp_mail( $user->user_email, sprintf( __( 'Confirm your email for %s', 'unfold' ), $site ), $message );
+	}
+
+	private static function clear_verification_meta( $user_id ) {
+		delete_user_meta( $user_id, 'unfold_verify_hash' );
+		delete_user_meta( $user_id, 'unfold_verify_expires' );
+		delete_user_meta( $user_id, 'unfold_otp_hash' );
+		delete_user_meta( $user_id, 'unfold_otp_expires' );
+		delete_user_meta( $user_id, 'unfold_otp_attempts' );
 	}
 
 	public static function handle_verify_link() {
@@ -168,8 +225,7 @@ class Unfold_Accounts {
 			return;
 		}
 		update_user_meta( $uid, 'unfold_email_verified', '1' );
-		delete_user_meta( $uid, 'unfold_verify_hash' );
-		delete_user_meta( $uid, 'unfold_verify_expires' );
+		self::clear_verification_meta( $uid );
 		wp_set_current_user( $uid );
 		wp_set_auth_cookie( $uid, false, is_ssl() );
 		wp_safe_redirect( self::home_for( get_userdata( $uid ) ) );
@@ -203,6 +259,8 @@ class Unfold_Accounts {
 			self::do_register();
 		} elseif ( 'resend' === $form ) {
 			self::do_resend();
+		} elseif ( 'verify_otp' === $form ) {
+			self::do_verify_otp();
 		}
 	}
 
@@ -250,7 +308,45 @@ class Unfold_Accounts {
 			set_transient( 'unfold_resend_' . $user->ID, 1, MINUTE_IN_SECONDS );
 			self::send_verification( $user->ID );
 		}
-		self::flash( 'login_notice', __( 'If that account is waiting for confirmation, a new link is on its way.', 'unfold' ) );
+		self::flash( 'login_notice', __( 'If that account is waiting for confirmation, a new link and code are on their way.', 'unfold' ) );
+		if ( '' !== $login ) {
+			self::flash( 'verify_email', $login );
+		}
+	}
+
+	private static function do_verify_otp() {
+		if ( ! self::nonce_ok( '_unfold_verify_otp', 'unfold_verify_otp' ) ) {
+			self::flash( 'verify_error', __( 'Your session expired. Please try again.', 'unfold' ) );
+			return;
+		}
+		$login = sanitize_text_field( self::post_str( 'log' ) );
+		$otp   = preg_replace( '/\s+/', '', self::post_str( 'otp' ) );
+		self::flash( 'verify_email', $login );
+		$user = is_email( $login ) ? get_user_by( 'email', $login ) : get_user_by( 'login', $login );
+		if ( ! $user || ! self::is_unverified( $user->ID ) ) {
+			self::flash( 'verify_error', __( 'Invalid or expired verification code.', 'unfold' ) );
+			return;
+		}
+		$attempts = (int) get_user_meta( $user->ID, 'unfold_otp_attempts', true );
+		if ( $attempts >= self::OTP_MAX_ATTEMPTS ) {
+			self::flash( 'verify_error', __( 'Too many wrong attempts. Request a new confirmation code.', 'unfold' ) );
+			self::flash( 'resend_for', $login );
+			return;
+		}
+		$hash    = get_user_meta( $user->ID, 'unfold_otp_hash', true );
+		$expires = (int) get_user_meta( $user->ID, 'unfold_otp_expires', true );
+		if ( ! $hash || ! $otp || $expires <= time() || ! wp_check_password( $otp, $hash ) ) {
+			update_user_meta( $user->ID, 'unfold_otp_attempts', $attempts + 1 );
+			self::flash( 'verify_error', __( 'That verification code is invalid or expired. Check your KAU inbox or request a new code.', 'unfold' ) );
+			self::flash( 'resend_for', $login );
+			return;
+		}
+		update_user_meta( $user->ID, 'unfold_email_verified', '1' );
+		self::clear_verification_meta( $user->ID );
+		wp_set_current_user( $user->ID );
+		wp_set_auth_cookie( $user->ID, false, is_ssl() );
+		wp_safe_redirect( self::home_for( $user ) );
+		exit;
 	}
 
 	private static function do_register() {
@@ -323,6 +419,17 @@ class Unfold_Accounts {
 			. ( $foot ? '<p class="uf-auth-foot">' . $foot . '</p>' : '' ) . '</div></div>';
 	}
 
+	private static function otp_form( $email ) {
+		return '<form method="post" class="uf-form uf-otp-form" novalidate>'
+			. wp_nonce_field( 'unfold_verify_otp', '_unfold_verify_otp', true, false )
+			. '<input type="hidden" name="unfold_form" value="verify_otp">'
+			. '<input type="hidden" name="log" value="' . esc_attr( $email ) . '">'
+			. '<label class="uf-field"><span>' . esc_html__( '6-digit verification code', 'unfold' ) . '</span>'
+			. '<input type="text" name="otp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required placeholder="000000"></label>'
+			. '<button class="uf-btn uf-btn--block" type="submit">' . esc_html__( 'Verify email', 'unfold' ) . '</button>'
+			. '</form>';
+	}
+
 	public static function login_shortcode() {
 		if ( is_user_logged_in() ) {
 			$u = wp_get_current_user();
@@ -333,20 +440,26 @@ class Unfold_Accounts {
 				'<a href="' . esc_url( wp_logout_url( home_url( '/' ) ) ) . '">' . esc_html__( 'Sign out', 'unfold' ) . '</a>'
 			);
 		}
-		$err    = self::flash( 'login_error' );
-		$notice = self::flash( 'login_notice' );
-		$resend = self::flash( 'resend_for' );
-		$body   = ( $err ? '<div class="uf-alert uf-alert--error" role="alert">' . esc_html( $err ) . '</div>' : '' )
+		$err         = self::flash( 'login_error' );
+		$notice      = self::flash( 'login_notice' );
+		$resend      = self::flash( 'resend_for' );
+		$verify_err  = self::flash( 'verify_error' );
+		$verify_mail = self::flash( 'verify_email' ) ?: $resend;
+		$body        = ( $err ? '<div class="uf-alert uf-alert--error" role="alert">' . esc_html( $err ) . '</div>' : '' )
+			. ( $verify_err ? '<div class="uf-alert uf-alert--error" role="alert">' . esc_html( $verify_err ) . '</div>' : '' )
 			. ( $notice ? '<div class="uf-alert uf-alert--ok" role="status">' . esc_html( $notice ) . '</div>' : '' );
+		if ( $verify_mail ) {
+			$body .= self::otp_form( $verify_mail );
+		}
 		if ( $resend ) {
 			$body .= '<form method="post" class="uf-inline-form">' . wp_nonce_field( 'unfold_resend', '_unfold_resend', true, false )
 				. '<input type="hidden" name="unfold_form" value="resend"><input type="hidden" name="log" value="' . esc_attr( $resend ) . '">'
-				. '<button class="uf-linkbtn" type="submit">' . esc_html__( 'Send the confirmation link again', 'unfold' ) . '</button></form>';
+				. '<button class="uf-linkbtn" type="submit">' . esc_html__( 'Send the confirmation link and code again', 'unfold' ) . '</button></form>';
 		}
 		$body .= '<form method="post" class="uf-form" novalidate>'
 			. wp_nonce_field( 'unfold_login', '_unfold_login', true, false )
 			. '<input type="hidden" name="unfold_form" value="login">'
-			. '<label class="uf-field"><span>' . esc_html__( 'Email', 'unfold' ) . '</span><input type="text" name="log" autocomplete="username" required value="' . esc_attr( sanitize_text_field( wp_unslash( $_POST['log'] ?? '' ) ) ) . '"></label>' // phpcs:ignore WordPress.Security.NonceVerification
+			. '<label class="uf-field"><span>' . esc_html__( 'Email', 'unfold' ) . '</span><input type="text" name="log" autocomplete="username" required value="' . esc_attr( sanitize_text_field( self::post_str( 'log' ) ) ) . '"></label>'
 			. '<label class="uf-field"><span>' . esc_html__( 'Password', 'unfold' ) . '</span><input type="password" name="pwd" autocomplete="current-password" required></label>'
 			. '<label class="uf-check"><input type="checkbox" name="rememberme" value="1"> ' . esc_html__( 'Keep me signed in', 'unfold' ) . '</label>'
 			. '<button class="uf-btn uf-btn--block" type="submit">' . esc_html__( 'Sign in', 'unfold' ) . '</button>'
@@ -360,12 +473,20 @@ class Unfold_Accounts {
 		if ( is_user_logged_in() ) {
 			return self::login_shortcode();
 		}
-		$done = self::flash( 'registered' );
-		if ( $done ) {
+		$done        = self::flash( 'registered' );
+		$verify_mail = $done ?: self::flash( 'verify_email' );
+		$verify_err  = self::flash( 'verify_error' );
+		if ( $verify_mail ) {
+			$body = ( $verify_err ? '<div class="uf-alert uf-alert--error" role="alert">' . esc_html( $verify_err ) . '</div>' : '' )
+				. '<p>' . esc_html( sprintf( __( 'We sent a 6-digit verification code (valid for 15 minutes) and a confirmation link to %s. Enter the code below or open the link in your KAU inbox.', 'unfold' ), $verify_mail ) ) . '</p>'
+				. self::otp_form( $verify_mail )
+				. '<form method="post" class="uf-inline-form">' . wp_nonce_field( 'unfold_resend', '_unfold_resend', true, false )
+				. '<input type="hidden" name="unfold_form" value="resend"><input type="hidden" name="log" value="' . esc_attr( $verify_mail ) . '">'
+				. '<button class="uf-linkbtn" type="submit">' . esc_html__( 'Send a new code', 'unfold' ) . '</button></form>';
 			return self::card(
-				__( 'Check your email', 'unfold' ),
+				__( 'Verify your KAU email', 'unfold' ),
 				'',
-				'<p>' . esc_html( sprintf( __( 'We sent a confirmation link to %s. Open it to activate your account; it works for 48 hours.', 'unfold' ), $done ) ) . '</p>',
+				$body,
 				'<a href="' . esc_url( Unfold_Portals::url( 'login' ) ) . '">' . esc_html__( 'Back to sign in', 'unfold' ) . '</a>'
 			);
 		}
