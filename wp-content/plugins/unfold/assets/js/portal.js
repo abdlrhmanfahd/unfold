@@ -421,7 +421,7 @@
 		var box = ws.querySelector( '[data-uf-errors]' );
 		if ( ! box ) return;
 		if ( ! errors || ! errors.length ) { box.innerHTML = ''; return; }
-		box.innerHTML = '<div class="uf-alert uf-alert--error" role="alert"><strong>' + errors.length + ( errors.length === 1 ? ' thing needs fixing' : ' things need fixing' ) + ' before you can submit:</strong><ul>' + errors.slice( 0, 30 ).map( function ( e ) {
+		box.innerHTML = '<div class="uf-alert uf-alert--warn" role="status"><strong>' + errors.length + ( errors.length === 1 ? ' note to review' : ' notes to review' ) + ' (you can still submit):</strong><ul>' + errors.slice( 0, 30 ).map( function ( e ) {
 			var i = e.indexOf( ': ' ), path = i > 0 ? e.slice( 0, i ) : '', msg = i > 0 ? e.slice( i + 2 ) : e;
 			return '<li>' + ( path && path !== '(top level)' ? '<button type="button" class="uf-linkbtn" data-path="' + esc( path ) + '">' + esc( pretty( path ) ) + '</button> — ' : '' ) + esc( msg ) + '</li>';
 		} ).join( '' ) + '</ul></div>';
@@ -447,7 +447,7 @@
 				return save();
 			}
 			dirty = false;
-			status( p.errors.length ? 'Saved — ' + p.errors.length + ' to fix before submitting' : 'All changes saved' );
+			status( p.errors.length ? 'Saved (' + p.errors.length + ' note' + ( p.errors.length === 1 ? '' : 's' ) + ' to review)' : 'All changes saved' );
 		}, function ( e ) {
 			saving = null;
 			status( 'Could not save: ' + e.message );
@@ -461,9 +461,9 @@
 
 	function submit() {
 		save().then( function () {
-			if ( P.errors && P.errors.length ) { ws.querySelector( '[data-uf-errors]' ).scrollIntoView( { behavior: 'smooth' } ); return; }
 			var c = form.counts();
-			var msg = c.tracked - c.confirmed > 0 ? ( c.tracked - c.confirmed ) + ' values are not marked as checked yet. Submit anyway? Unchecked values are shown to visitors with an "unconfirmed" marker.' : 'Submit this project for review? You cannot edit it while it is being reviewed.';
+			var prefix = ( P.errors && P.errors.length ) ? ( P.errors.length === 1 ? 'There is 1 review note above. ' : 'There are ' + P.errors.length + ' review notes above. ' ) : '';
+			var msg = prefix + ( c.tracked - c.confirmed > 0 ? ( c.tracked - c.confirmed ) + ' values are not marked as checked yet. Submit anyway? Unchecked values are shown to visitors with an "unconfirmed" marker.' : 'Submit this project for review? You cannot edit it while it is being reviewed.' );
 			var sims = ( ( form.getData() || {} ).subsystems || [] ).filter( function ( s ) { return s.sim && s.sim.template && s.sim.student_approved; } ).length;
 			if ( sims ) msg += ' ' + sims + ' simulation' + ( sims > 1 ? 's are' : ' is' ) + ' marked as checked and will be shown to visitors; make sure you tried ' + ( sims > 1 ? 'them' : 'it' ) + '.';
 			confirmBox( msg, function () {

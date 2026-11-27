@@ -91,11 +91,11 @@ as LaTeX. Only list parameters with values the report or config files give.
 - on: the QCar 2 hardware the part runs on, reads or drives, from: chassis, wheels, servo (steering), \
 motor (drive), encoder (speed), battery, board (main board), imu, compute (Jetson computer), lidar, \
 depth (RealSense depth camera), csi (360 cameras), lights, wifi.
-- meta.question: the project's question in one short plain line ("Can software fix bent wheels?"). \
+- meta.question: the project's question in one short plain line (at most 90 characters, e.g. "Can software fix bent wheels?"). \
 meta.short_description: always write it - 2-3 plain sentences shown right under the title on the \
 project page: what the project builds or tests, how, and on what (a non-specialist must follow it), from \
 the report only. meta.headline: the one result that answers it, as before/after numbers from the report with a short \
-label ("Tracking loss, without -> with the fix"); null if the report has no such pair.
+label (at most 60 characters, e.g. "Tracking loss, without -> with the fix"); null if the report has no such pair.
 - sim: choose a template only when it models the part; otherwise null. Templates and their inputs:
   * path_follow (Stanley-type steering along a route, with an optional steering bias and its correction). \
 Inputs: k, v_soft, dmax (rad), b (bias, rad), bhat (correction, rad), ref_off (m), corridor (m), \
@@ -445,6 +445,24 @@ def parse_json(text: str) -> dict:
     return data
 
 
+def _trim_chars(text: str, limit: int, preserve_qmark: bool = False) -> str:
+    s = re.sub(r"\s+", " ", text).strip()
+    if len(s) <= limit:
+        return s
+    if preserve_qmark and s.endswith("?") and limit > 1:
+        cap = limit - 1
+        cut = s[:cap]
+        if " " in cut:
+            cut = cut.rsplit(" ", 1)[0]
+        cut = cut.rstrip(" ,;:-.")
+        return (cut or s[:cap].rstrip()) + "?"
+    cut = s[:limit]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    cut = cut.rstrip(" ,;:-")
+    return cut or s[:limit]
+
+
 def enforce_rules(data: dict) -> dict:
     data["schema_version"] = "0.2"
 
@@ -461,12 +479,60 @@ def enforce_rules(data: dict) -> dict:
                 walk(v)
 
     walk(data)
-    for s in data.get("subsystems", []):
-        sim = s.get("sim")
-        if not isinstance(sim, dict) or not sim.get("template"):
-            s["sim"] = None
-        else:
-            sim["student_approved"] = True
+    meta = data.get("meta")
+    if isinstance(meta, dict):
+        q = meta.get("question")
+        if isinstance(q, str):
+            trimmed_q = _trim_chars(q, 90, preserve_qmark=True)
+            meta["question"] = trimmed_q if trimmed_q else None
+        hl = meta.get("headline")
+        if hl is not None:
+            if not isinstance(hl, dict) or not isinstance(hl.get("label"), str) or not hl["label"].strip():
+                meta["headline"] = None
+            else:
+                hl["label"] = _trim_chars(hl["label"], 60)
+
+    subsystems = data.get("subsystems")
+    valid_sub_ids: set[str] = set()
+    if isinstance(subsystems, list):
+        for s in subsystems:
+            if not isinstance(s, dict):
+                continue
+            sid = s.get("id")
+            if isinstance(sid, str) and sid:
+                valid_sub_ids.add(sid)
+            if isinstance(s.get("name"), str):
+                words = s["name"].split()
+                if len(words) > 3:
+                    s["name"] = " ".join(words[:3])
+            if isinstance(s.get("plain"), str):
+                p_words = s["plain"].split()
+                if len(p_words) > 12:
+                    s["plain"] = " ".join(p_words[:11]).rstrip(".,;:") + "."
+            sim = s.get("sim")
+            if not isinstance(sim, dict) or not sim.get("template"):
+                s["sim"] = None
+            else:
+                sim["student_approved"] = True
+
+    if valid_sub_ids:
+        for df in (data.get("data_files") or []):
+            if isinstance(df, dict) and df.get("subsystem") not in valid_sub_ids:
+                df["subsystem"] = None
+        results = data.get("results")
+        if isinstance(results, dict):
+            for m in (results.get("media") or []):
+                if isinstance(m, dict) and m.get("part") not in valid_sub_ids:
+                    m["part"] = None
+        if isinstance(data.get("connections"), list):
+            data["connections"] = [
+                c for c in data["connections"]
+                if isinstance(c, dict) and c.get("from") in valid_sub_ids and c.get("to") in valid_sub_ids
+            ]
+        for sr in (data.get("sensors") or []):
+            if isinstance(sr, dict) and isinstance(sr.get("used_by"), list):
+                sr["used_by"] = [u for u in sr["used_by"] if u in valid_sub_ids]
+
     return data
 
 
@@ -1605,9 +1671,14 @@ def merge_with_skeleton(ai_data: dict, skeleton: dict, files: list[dict] | None 
             break
         sk_name = str(sk_df.get("file") or "").strip()
         if sk_name and sk_name.lower() not in seen_df_lower:
-            norm_df.append(copy.deepcopy(sk_df))
+            sk_copy = copy.deepcopy(sk_df)
+            sk_copy["subsystem"] = sk_copy.get("subsystem") if sk_copy.get("subsystem") in valid_sub_ids else None
+            norm_df.append(sk_copy)
             seen_df_lower.add(sk_name.lower())
-    merged["data_files"] = norm_df[:10] if norm_df else copy.deepcopy(skeleton["data_files"])
+    merged["data_files"] = norm_df[:10] if norm_df else [
+        {**copy.deepcopy(df), "subsystem": df.get("subsystem") if df.get("subsystem") in valid_sub_ids else None}
+        for df in (skeleton.get("data_files") or [])
+    ]
 
     # Results, metrics, limitations, future_work & media (grounded against ZIP and free of placeholders).
     merged["results"] = _deep_merge_prefer_ai(cleaned.get("results"), skeleton["results"])
@@ -1636,7 +1707,10 @@ def merge_with_skeleton(ai_data: dict, skeleton: dict, files: list[dict] | None 
         raw_cap = m.get("caption")
         caption = raw_cap if isinstance(raw_cap, str) and not _is_placeholder_text(raw_cap) else None
         clean_media.append({"file": resolved, "caption": caption, "part": part})
-    merged["results"]["media"] = clean_media if clean_media else copy.deepcopy(skeleton["results"]["media"])
+    merged["results"]["media"] = clean_media if clean_media else [
+        {**copy.deepcopy(m), "part": m.get("part") if m.get("part") in valid_sub_ids else None}
+        for m in (skeleton.get("results", {}).get("media") or [])
+    ]
     return merged
 
 

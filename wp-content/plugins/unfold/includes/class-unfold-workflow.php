@@ -732,11 +732,22 @@ class Unfold_Workflow {
 
 	public static function submit( $post_id ) {
 		$data = Unfold_Store::get( $post_id );
-		if ( ! $data || Unfold_Store::get_errors( $post_id ) ) {
+		if ( ! $data ) {
+			$decoded = json_decode( Unfold_Store::get_raw( $post_id ), true );
+			$data    = is_array( $decoded ) ? $decoded : null;
+		}
+		if ( ! is_array( $data ) ) {
 			return new WP_Error( 'unfold_invalid', __( 'Fix the problems in the form before submitting.', 'unfold' ), array( 'status' => 400 ) );
 		}
+		if ( ! isset( $data['review'] ) || ! is_array( $data['review'] ) ) {
+			$data['review'] = array();
+		}
 		$data['review']['student_confirmed_at'] = gmdate( 'Y-m-d' );
-		Unfold_Store::save( $post_id, wp_json_encode( $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) );
+		$encoded                                = wp_json_encode( $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+		Unfold_Store::save( $post_id, $encoded );
+		if ( null === Unfold_Store::get( $post_id ) ) {
+			update_post_meta( $post_id, UNFOLD_META_JSON, wp_slash( wp_json_encode( $data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) ) );
+		}
 		self::set_state( $post_id, 'submitted' );
 		return true;
 	}
