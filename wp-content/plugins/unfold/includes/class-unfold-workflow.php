@@ -450,10 +450,10 @@ class Unfold_Workflow {
 	}
 
 	/**
-	 * Start the AI reader (extractor/unfold_worker.py) on this computer when a job is queued, so
+	 * Start the AI reader (workers/extractor/unfold_worker.py) on this computer when a job is queued, so
 	 * nothing has to keep running between uploads. It handles every waiting job, then exits.
 	 * Needs UNFOLD_EXTRACT_PYTHON and UNFOLD_EXTRACT_WORKER in wp-config.php; the worker finds its
-	 * own token and Anthropic key (they never pass through WordPress). Skipped while a worker is
+	 * own token and AI credentials (never passed through WordPress). Skipped while a worker is
 	 * already polling (a separate lab server, or one started a moment ago).
 	 */
 	public static function launch_extractor() {

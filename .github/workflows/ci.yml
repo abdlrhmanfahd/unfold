@@ -47,3 +47,23 @@ jobs:
 
       - name: Run JS syntax, ESLint, and integrity tests
         run: npm run check
+
+  python-checks:
+    name: python-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python worker dependencies
+        run: python -m pip install requests pypdf
+
+      - name: Compile-check Python workers
+        run: python -m py_compile workers/extractor/unfold_worker.py
+
+      - name: Run Python unit tests
+        run: python -m unittest discover -s tests/python -v
