@@ -11,7 +11,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$TaskNames = @('Unfold-WorldWorker', 'Unfold-ExtractorWorker')
+$TaskNames = @('Unfold-Ollama', 'Unfold-WorldWorker', 'Unfold-ExtractorWorker')
 
 if ($Uninstall) {
     foreach ($name in $TaskNames) {
@@ -23,21 +23,40 @@ if ($Uninstall) {
     return
 }
 
-function Find-Python([string]$PreferredVenv) {
-    if (Test-Path $PreferredVenv) { return $PreferredVenv }
+function Find-Python([string[]]$Candidates) {
+    foreach ($p in $Candidates) {
+        if ($p -and (Test-Path $p)) { return $p }
+    }
     $cmd = Get-Command python -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
-    throw "Python executable not found (checked $PreferredVenv and PATH)."
+    throw "Python executable not found (checked $($Candidates -join ', ') and PATH)."
 }
 
-$WorldPy   = Find-Python "$env:LOCALAPPDATA\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\unfold-session-export\venv\Scripts\python.exe"
-$ExtractPy = Find-Python "$env:LOCALAPPDATA\unfold-extractor\venv\Scripts\python.exe"
+$WorldPy = Find-Python @(
+    (Join-Path $RepoRoot 'workers\world\.venv\Scripts\python.exe'),
+    "$env:LOCALAPPDATA\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\unfold-session-export\venv\Scripts\python.exe"
+)
+$ExtractPy = Find-Python @(
+    (Join-Path $RepoRoot 'workers\extractor\.venv\Scripts\python.exe'),
+    "$env:LOCALAPPDATA\unfold-extractor\venv\Scripts\python.exe"
+)
 
 $WorldScript   = Join-Path $RepoRoot 'workers\world\world_worker.py'
 $ExtractScript = Join-Path $RepoRoot 'workers\extractor\unfold_worker.py'
 
 $Trigger  = New-ScheduledTaskTrigger -AtLogOn
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 365)
+
+$ollamaExe = (Get-Command ollama -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue)
+if (-not $ollamaExe) {
+    $localOllama = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
+    if (Test-Path $localOllama) { $ollamaExe = $localOllama }
+}
+if ($ollamaExe) {
+    Register-ScheduledTask -TaskName 'Unfold-Ollama' `
+        -Action (New-ScheduledTaskAction -Execute $ollamaExe -Argument 'serve') `
+        -Trigger $Trigger -Settings $Settings -Force | Out-Null
+}
 
 $worldCmd = "set `"UNFOLD_SITE=$SiteUrl`" && `"$WorldPy`" -u `"$WorldScript`""
 Register-ScheduledTask -TaskName 'Unfold-WorldWorker' `
@@ -50,5 +69,5 @@ Register-ScheduledTask -TaskName 'Unfold-ExtractorWorker' `
     -Action (New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c $extCmd" -WorkingDirectory $RepoRoot) `
     -Trigger $Trigger -Settings $Settings -Force | Out-Null
 
-Write-Host "Registered scheduled tasks: Unfold-WorldWorker, Unfold-ExtractorWorker (Site: $SiteUrl)"
+Write-Host "Registered scheduled tasks: $($TaskNames -join ', ') (Site: $SiteUrl)"
 Write-Host "Start them now with: Start-ScheduledTask -TaskName Unfold-WorldWorker; Start-ScheduledTask -TaskName Unfold-ExtractorWorker"

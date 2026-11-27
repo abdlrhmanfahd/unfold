@@ -2,6 +2,26 @@
 
 This kit turns a single Windows (or Linux) computer-lab PC into a self-contained Unfold server for students and instructors across the lab LAN.
 
+## Quick Start (1-Command Lab PC Transfer)
+
+Because GitHub blocks multi-gigabyte installers and LLM weights (>100 MB), Ollama and its model are bootstrapped automatically via script instead of tracked binaries. On the computer lab PC, run:
+
+```powershell
+git clone https://github.com/abdlrhmanfahd/unfold.git
+cd unfold
+.\deploy\lab\setup-lab.ps1
+```
+
+That single script:
+1. Creates repo-local Python environments (`workers/extractor/.venv`, `workers/world/.venv`) and installs all requirements (`requests`, `pypdf`, `numpy`, `pyfqmr`, etc.).
+2. Installs **Ollama** (via `winget`), starts `ollama serve`, and pulls `qwen2.5:7b` (pass `-Model qwen2.5:14b` if the lab PC has a strong GPU).
+3. Enables the **Lab Local Ollama** preset in WordPress so students can extract projects offline at \$0 cost.
+4. Registers Windows boot auto-start tasks (`Unfold-Ollama`, `Unfold-WorldWorker`, `Unfold-ExtractorWorker`).
+
+> **Slow lab internet?** Copy `%USERPROFILE%\.ollama\models` from your personal PC to the lab PC over USB before running `setup-lab.ps1` — Ollama reuses the copied weights without re-downloading.
+
+---
+
 ## 1. Prerequisites on the Lab Machine
 
 1. **Web + PHP 8.4 + WordPress** (either WordPress Studio locally, or Nginx/Apache + PHP-FPM + MySQL/MariaDB).
