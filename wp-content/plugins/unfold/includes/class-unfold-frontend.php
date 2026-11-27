@@ -135,7 +135,7 @@ class Unfold_Frontend {
 				$out[] = array( $p, $d );
 			}
 		}
-		usort( $out, static function ( $a, $b ) { return count( Unfold_Render::sims( $b[1] ) ) <=> count( Unfold_Render::sims( $a[1] ) ); } );
+		usort( $out, static function ( $a, $b ) { return Unfold_Render::playable( $b[1] ) <=> Unfold_Render::playable( $a[1] ); } );
 		return $out;
 	}
 
@@ -145,9 +145,10 @@ class Unfold_Frontend {
 		if ( ! $list ) {
 			return '';
 		}
+		wp_enqueue_style( 'unfold' );
 		list( $p, $d ) = $list[0];
 		$cover = Unfold_Render::cover_image( $p->ID, $d );
-		$sims  = Unfold_Render::sims( $d );
+		$sims  = Unfold_Render::playable( $d );
 		$parts = array_slice( wp_list_pluck( $d['subsystems'], 'name' ), 0, 5 );
 		$more  = count( $d['subsystems'] ) - count( $parts );
 
@@ -164,7 +165,7 @@ class Unfold_Frontend {
 
 		$out  = '<div class="uf-frame"><a class="uf-frame-inner uf-feature" href="' . esc_url( get_permalink( $p ) ) . '">';
 		$out .= $cover ? '<div class="uf-feature-media">' . wp_get_attachment_image( $cover, 'large', false, array( 'alt' => '', 'loading' => 'eager' ) ) . '</div>' : '';
-		$out .= '<div class="uf-feature-body"><p class="uf-feature-label">' . esc_html( $sims ? sprintf( _n( 'Featured project · %d simulation', 'Featured project · %d simulations', count( $sims ), 'unfold' ), count( $sims ) ) : __( 'Featured project', 'unfold' ) ) . '</p>'
+		$out .= '<div class="uf-feature-body"><p class="uf-feature-label">' . esc_html( $sims ? sprintf( _n( 'Featured project · %d simulation', 'Featured project · %d simulations', $sims, 'unfold' ), $sims ) : __( 'Featured project', 'unfold' ) ) . '</p>'
 			. '<h2 class="uf-feature-title">' . esc_html( $d['meta']['title'] ) . '</h2>' . $result . '<ul class="uf-feature-parts">';
 		foreach ( $parts as $n ) {
 			$out .= '<li>' . esc_html( $n ) . '</li>';
@@ -179,11 +180,12 @@ class Unfold_Frontend {
 		if ( ! $list ) {
 			return '';
 		}
+		wp_enqueue_style( 'unfold' );
 		$parts = 0;
 		$sims  = 0;
 		foreach ( $list as $it ) {
 			$parts += count( $it[1]['subsystems'] );
-			$sims  += count( Unfold_Render::sims( $it[1] ) );
+			$sims  += Unfold_Render::playable( $it[1] );
 		}
 		return '<p class="uf-hero-facts">' . esc_html(
 			sprintf( _n( '%d project', '%d projects', count( $list ), 'unfold' ), count( $list ) ) . ' · '
