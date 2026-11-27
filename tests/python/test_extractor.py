@@ -201,6 +201,29 @@ class ExtractorWorkerTests(unittest.TestCase):
         self.assertEqual(payload["meta"]["model"], "local_rules")
         self.assertEqual(payload["data"]["schema_version"], "0.2")
 
+    def test_build_cover_prompt_uses_required_vector_style(self):
+        prompt = uw.build_cover_prompt({
+            "meta": {"title": "Autonomous QCar", "short_description": "LiDAR obstacle avoidance"},
+        })
+        self.assertTrue(prompt.startswith("2D vector illustration of Autonomous QCar - LiDAR obstacle avoidance,"))
+        self.assertIn("clean thin grey outlines, soft gradient shading", prompt)
+        self.assertIn("isolated on a pure white background.", prompt)
+
+    def test_generate_cover_image_uses_free_fallback_when_no_cloud_image_key(self):
+        fake_png = b"\x89PNG\r\n\x1a\n" + b"0" * 2048
+        fake_resp = mock.Mock()
+        fake_resp.ok = True
+        fake_resp.headers = {"Content-Type": "image/png"}
+        fake_resp.content = fake_png
+        with mock.patch.object(uw.requests, "get", return_value=fake_resp) as get_mock:
+            res = uw.generate_cover_image(uw.LLMClient("local_rules"), {"meta": {"title": "Fleet Robot", "short_description": "Multi-robot path planning"}})
+            self.assertIsNotNone(res)
+            img_bytes, mime, prompt = res
+            self.assertEqual(img_bytes, fake_png)
+            self.assertEqual(mime, "image/png")
+            self.assertIn("Fleet Robot", prompt)
+            self.assertTrue(get_mock.called)
+
 
 if __name__ == "__main__":
     unittest.main()
