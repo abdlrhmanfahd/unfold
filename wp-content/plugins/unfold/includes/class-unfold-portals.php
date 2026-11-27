@@ -155,6 +155,7 @@ class Unfold_Portals {
 				'presets'  => Unfold_AI::public_presets(),
 				'user'     => Unfold_AI::get_user_config( get_current_user_id() ),
 				'defaults' => Unfold_AI::DEFAULT_MODELS,
+				'models'   => Unfold_AI::CURATED_MODELS,
 			),
 		);
 

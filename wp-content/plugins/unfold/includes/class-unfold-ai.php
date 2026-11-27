@@ -20,6 +20,20 @@ class Unfold_AI {
 		'local_rules'   => 'local_rules',
 	);
 
+	const CURATED_MODELS = array(
+		'gemini'        => array( 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash' ),
+		'openai_compat' => array(
+			'llama-3.3-70b-versatile',
+			'llama-3.1-8b-instant',
+			'gpt-4o-mini',
+			'gpt-4.1-mini',
+			'deepseek/deepseek-chat-v3-0324:free',
+			'google/gemini-2.0-flash-exp:free',
+		),
+		'ollama'        => array( 'qwen2.5:7b', 'qwen2.5:14b', 'llama3.1:8b', 'mistral:7b' ),
+		'anthropic'     => array( 'claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-opus-4-1' ),
+	);
+
 	const OPTION_PRESETS   = 'unfold_ai_presets';
 	const USER_META_KEY    = '_unfold_ai_config';
 	const POST_META_CHOICE = '_unfold_ai_choice';
@@ -347,5 +361,137 @@ class Unfold_AI {
 			);
 		}
 		return null;
+	}
+
+	private static function is_safe_model_endpoint( $url ) {
+		$clean = self::sanitize_base_url( $url );
+		if ( '' === $clean ) {
+			return false;
+		}
+		$parts  = parse_url( $clean ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		$scheme = strtolower( (string) ( $parts['scheme'] ?? '' ) );
+		$host   = strtolower( (string) ( $parts['host'] ?? '' ) );
+		if ( 'https' === $scheme ) {
+			return '' !== $host;
+		}
+		return 'http' === $scheme && in_array( $host, array( 'localhost', '127.0.0.1', '::1' ), true );
+	}
+
+	/** Fetch live models available for a provider + key, falling back cleanly to curated defaults. */
+	public static function fetch_models( $provider, $base_url = '', $api_key = '' ) {
+		$provider = sanitize_key( (string) $provider );
+		if ( ! in_array( $provider, self::BYOK_PROVIDERS, true ) ) {
+			$provider = 'gemini';
+		}
+		$curated = self::CURATED_MODELS[ $provider ] ?? array();
+		$api_key = trim( (string) $api_key );
+		$live    = array();
+		$err     = '';
+
+		if ( ! function_exists( 'wp_remote_get' ) ) {
+			return array( 'models' => $curated, 'live' => false, 'error' => '' );
+		}
+
+		if ( 'gemini' === $provider ) {
+			if ( '' === $api_key ) {
+				return array( 'models' => $curated, 'live' => false, 'error' => '' );
+			}
+			$res = wp_remote_get(
+				add_query_arg( 'key', $api_key, 'https://generativelanguage.googleapis.com/v1beta/models' ),
+				array( 'timeout' => 8 )
+			);
+			if ( is_wp_error( $res ) ) {
+				$err = $res->get_error_message();
+			} elseif ( 200 === (int) wp_remote_retrieve_response_code( $res ) ) {
+				$body = json_decode( (string) wp_remote_retrieve_body( $res ), true );
+				foreach ( (array) ( $body['models'] ?? array() ) as $m ) {
+					$methods = (array) ( $m['supportedGenerationMethods'] ?? array() );
+					$name    = (string) ( $m['name'] ?? '' );
+					if ( in_array( 'generateContent', $methods, true ) && 0 === strpos( $name, 'models/' ) ) {
+						$id = sanitize_text_field( substr( $name, 7 ) );
+						if ( '' !== $id && false === stripos( $id, 'embedding' ) ) {
+							$live[] = $id;
+						}
+					}
+				}
+			} else {
+				$err = 'HTTP ' . (int) wp_remote_retrieve_response_code( $res );
+			}
+		} elseif ( 'ollama' === $provider ) {
+			$base = self::sanitize_base_url( $base_url ) ?: 'http://127.0.0.1:11434';
+			if ( self::is_safe_model_endpoint( $base ) ) {
+				$res = wp_remote_get( $base . '/api/tags', array( 'timeout' => 5 ) );
+				if ( is_wp_error( $res ) ) {
+					$err = $res->get_error_message();
+				} elseif ( 200 === (int) wp_remote_retrieve_response_code( $res ) ) {
+					$body = json_decode( (string) wp_remote_retrieve_body( $res ), true );
+					foreach ( (array) ( $body['models'] ?? array() ) as $m ) {
+						$id = sanitize_text_field( (string) ( $m['name'] ?? '' ) );
+						if ( '' !== $id ) {
+							$live[] = $id;
+						}
+					}
+				} else {
+					$err = 'HTTP ' . (int) wp_remote_retrieve_response_code( $res );
+				}
+			}
+		} elseif ( 'openai_compat' === $provider ) {
+			$base = self::sanitize_base_url( $base_url ) ?: 'https://api.groq.com/openai/v1';
+			if ( '' !== $api_key && self::is_safe_model_endpoint( $base ) ) {
+				$res = wp_remote_get(
+					$base . '/models',
+					array(
+						'timeout' => 8,
+						'headers' => array( 'Authorization' => 'Bearer ' . $api_key ),
+					)
+				);
+				if ( is_wp_error( $res ) ) {
+					$err = $res->get_error_message();
+				} elseif ( 200 === (int) wp_remote_retrieve_response_code( $res ) ) {
+					$body = json_decode( (string) wp_remote_retrieve_body( $res ), true );
+					foreach ( (array) ( $body['data'] ?? array() ) as $m ) {
+						$id = sanitize_text_field( (string) ( $m['id'] ?? '' ) );
+						if ( '' !== $id && false === stripos( $id, 'whisper' ) && false === stripos( $id, 'tts' ) && false === stripos( $id, 'embedding' ) ) {
+							$live[] = $id;
+						}
+					}
+				} else {
+					$err = 'HTTP ' . (int) wp_remote_retrieve_response_code( $res );
+				}
+			}
+		} elseif ( 'anthropic' === $provider && '' !== $api_key ) {
+			$res = wp_remote_get(
+				'https://api.anthropic.com/v1/models',
+				array(
+					'timeout' => 8,
+					'headers' => array(
+						'x-api-key'         => $api_key,
+						'anthropic-version' => '2023-06-01',
+					),
+				)
+			);
+			if ( is_wp_error( $res ) ) {
+				$err = $res->get_error_message();
+			} elseif ( 200 === (int) wp_remote_retrieve_response_code( $res ) ) {
+				$body = json_decode( (string) wp_remote_retrieve_body( $res ), true );
+				foreach ( (array) ( $body['data'] ?? array() ) as $m ) {
+					$id = sanitize_text_field( (string) ( $m['id'] ?? '' ) );
+					if ( '' !== $id ) {
+						$live[] = $id;
+					}
+				}
+			} else {
+				$err = 'HTTP ' . (int) wp_remote_retrieve_response_code( $res );
+			}
+		}
+
+		$live = array_values( array_unique( array_filter( $live ) ) );
+		if ( ! empty( $live ) ) {
+			// Put any curated favorites that exist in the live list first, then the rest of live.
+			$top    = array_values( array_intersect( $curated, $live ) );
+			$merged = array_values( array_unique( array_merge( $top, $live ) ) );
+			return array( 'models' => array_slice( $merged, 0, 80 ), 'live' => true, 'error' => '' );
+		}
+		return array( 'models' => $curated, 'live' => false, 'error' => $err );
 	}
 }

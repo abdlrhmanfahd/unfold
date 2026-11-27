@@ -54,20 +54,73 @@ class ExtractorWorkerTests(unittest.TestCase):
         self.assertNotIn("review", reduced["properties"])
         self.assertNotIn("minLength", json.dumps(reduced))
 
+    def test_pdf_text_rejects_binary_garbage(self):
+        noisy_pdf = b"%PDF-1.4\n1 0 obj\n<< /Length 40 >>\nstream\n(\xde\xc7#H \xd8F\xe8'O\x1b`\xc5\xfbOo \xb8\xb8Ze)\nendstream\nendobj\n%%EOF"
+        txt = uw.pdf_text(noisy_pdf)
+        self.assertEqual(txt, "")
+
     def test_local_rules_extract_produces_valid_structure(self):
         raw_zip, files = make_sample_zip()
-        # Use a PDF name so docx_text is not called on dummy bytes
         files[0]["path"] = "report.pdf"
         buf = io.BytesIO(raw_zip)
         with zipfile.ZipFile(buf, "a") as z:
-            z.writestr("report.pdf", b"%PDF-1.4 (Warehouse Fleet Control) %%EOF")
+            z.writestr("report.pdf", b"%PDF-1.4\nstream\nBT\n(Warehouse Fleet Control)\nET\nendstream\n%%EOF")
         data, meta = uw.local_rules_extract(buf.getvalue(), files, "report.pdf")
         self.assertEqual(meta["model"], "local_rules")
         self.assertEqual(data["schema_version"], "0.2")
         self.assertEqual(data["data_files"][0]["file"], "speed.csv")
+        self.assertEqual(data["data_files"][0]["format"], "csv")
         self.assertEqual(data["data_files"][0]["columns"][0]["name"], "t")
         self.assertEqual(data["results"]["media"][0]["file"], "plot1.png")
+        self.assertNotIn("type", data["results"]["media"][0])
         self.assertEqual(data["subsystems"][0]["code_files"], ["src/speed_ctrl.py"])
+
+    def test_local_rules_extract_ast_subsystems_connections_and_docx_sections(self):
+        buf = io.BytesIO()
+        doc_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+            '<w:p><w:r><w:t>Autonomous QCar Obstacle Avoidance System</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>Abstract</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>This project implements real-time LiDAR obstacle avoidance on QLabs and physical QCar 2 platforms.</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>Objectives</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>1. Detect static obstacles within 1.5 m using LiDAR scans at 10 Hz.</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>Results</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>Success rate: 96%</w:t></w:r></w:p>'
+            '</w:body></w:document>'
+        )
+        docx_buf = io.BytesIO()
+        with zipfile.ZipFile(docx_buf, "w") as dz:
+            dz.writestr("word/document.xml", doc_xml)
+
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("report.docx", docx_buf.getvalue())
+            z.writestr("a8_lidar.py", '"""Processes 2D LiDAR scans."""\nLIDAR_RANGE_M = 2.5\n')
+            z.writestr("a8_run.py", '"""Main vehicle speed controller."""\nimport a8_lidar\nMAX_SPEED_MPS = 0.6\n')
+            z.writestr("make_slides.py", '"""Helper script to generate presentation slides."""\n')
+            z.writestr("runs.csv", "t_s,v_mps\n0.0,0.4\n")
+            z.writestr("stop_calibration.png", b"PNG")
+
+        files = [
+            {"path": "report.docx", "size": 500, "kind": "report", "blocked": False},
+            {"path": "a8_lidar.py", "size": 60, "kind": "code", "blocked": False},
+            {"path": "a8_run.py", "size": 80, "kind": "code", "blocked": False},
+            {"path": "make_slides.py", "size": 50, "kind": "code", "blocked": False},
+            {"path": "runs.csv", "size": 30, "kind": "data", "blocked": False},
+            {"path": "stop_calibration.png", "size": 10, "kind": "image", "blocked": False},
+        ]
+        data, _ = uw.local_rules_extract(buf.getvalue(), files, "report.docx")
+        sub_ids = [s["id"] for s in data["subsystems"]]
+        self.assertIn("perception", sub_ids)
+        self.assertIn("control", sub_ids)
+        self.assertNotIn("make_slides.py", [f for s in data["subsystems"] for f in s["code_files"]])
+        self.assertEqual(data["connections"], [{"from": "perception", "to": "control", "signal": "a8_lidar module data"}])
+        self.assertEqual(data["meta"]["platform"]["mode"], "both")
+        self.assertIn("python", data["meta"]["platform"]["software_stack"])
+        self.assertEqual(data["goal"]["objectives"], ["Detect static obstacles within 1.5 m using LiDAR scans at 10 Hz."])
+        self.assertEqual(data["results"]["metrics"][0]["value"]["value"], 96.0)
+        self.assertEqual(data["data_files"][0]["format"], "csv")
+        self.assertNotIn("type", data["results"]["media"][0])
 
     def test_gemini_client_parses_response(self):
         fake_resp = mock.Mock()

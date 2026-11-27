@@ -30,6 +30,7 @@ class Unfold_Rest {
 		// Member AI preferences (permanent BYOK & extraction mode).
 		register_rest_route( self::NS, '/me/ai', array( 'methods' => 'GET', 'callback' => array( __CLASS__, 'me_ai_get' ), 'permission_callback' => $member ) );
 		register_rest_route( self::NS, '/me/ai', array( 'methods' => 'PUT', 'callback' => array( __CLASS__, 'me_ai_save' ), 'permission_callback' => $member ) );
+		register_rest_route( self::NS, '/me/ai/models', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'me_ai_models' ), 'permission_callback' => $member ) );
 
 		// Uploads (chunked).
 		register_rest_route( self::NS, '/uploads', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'upload_start' ), 'permission_callback' => $member ) );
@@ -80,6 +81,23 @@ class Unfold_Rest {
 			$params = $r->get_params();
 		}
 		return Unfold_AI::save_user_config( get_current_user_id(), is_array( $params ) ? $params : array() );
+	}
+
+	public static function me_ai_models( WP_REST_Request $r ) {
+		$params = $r->get_json_params();
+		if ( ! is_array( $params ) ) {
+			$params = $r->get_params();
+		}
+		$provider = sanitize_key( (string) ( $params['provider'] ?? 'gemini' ) );
+		$base_url = (string) ( $params['base_url'] ?? '' );
+		$api_key  = trim( (string) ( $params['api_key'] ?? '' ) );
+		if ( '' === $api_key ) {
+			$saved = get_user_meta( get_current_user_id(), Unfold_AI::USER_META_KEY, true );
+			if ( is_array( $saved ) && ( $saved['provider'] ?? '' ) === $provider && ! empty( $saved['api_key_enc'] ) ) {
+				$api_key = Unfold_AI::decrypt_secret( (string) $saved['api_key_enc'] );
+			}
+		}
+		return Unfold_AI::fetch_models( $provider, $base_url, $api_key );
 	}
 
 	private static function extract_ai_param( WP_REST_Request $r ) {

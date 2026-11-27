@@ -250,6 +250,7 @@
 .uf-state { border-radius: 4px; }
 
 /* Extraction method selector (Presets / BYOK / Quick Extract) */
+.uf-ai-box [hidden] { display: none !important; }
 .uf-ai-box { border: 1px solid var(--uf-line); border-radius: 12px; padding: var(--uf-s4); margin-top: var(--uf-s4); background: var(--uf-soft); }
 .uf-ai-title { font-weight: 700; font-size: .95rem; margin: 0 0 var(--uf-s2) !important; }
 .uf-ai-modes { display: grid; gap: 8px; }
