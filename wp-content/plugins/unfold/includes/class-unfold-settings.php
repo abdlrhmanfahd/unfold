@@ -100,6 +100,24 @@ class Unfold_Settings {
 				<input type="email" class="regular-text" name="unfold_test_to" required placeholder="yourname@kau.edu.sa" value="<?php echo esc_attr( wp_get_current_user()->user_email ); ?>">
 				<?php submit_button( __( 'Send test email', 'unfold' ), 'secondary', 'submit', false ); ?>
 			</form>
+
+			<hr>
+			<h2><?php esc_html_e( 'Lab System Status', 'unfold' ); ?></h2>
+			<?php
+			$world_seen   = (int) get_option( 'unfold_world_worker_seen', 0 );
+			$extract_seen = (int) get_option( 'unfold_worker_seen', 0 );
+			$world_auto   = defined( 'UNFOLD_WORLD_PYTHON' ) && defined( 'UNFOLD_WORLD_WORKER' );
+			$extract_auto = defined( 'UNFOLD_EXTRACT_PYTHON' ) && defined( 'UNFOLD_EXTRACT_WORKER' );
+			?>
+			<table class="widefat striped" style="max-width:760px">
+				<tbody>
+					<tr><th><?php esc_html_e( 'Site URL & PHP', 'unfold' ); ?></th><td><code><?php echo esc_html( home_url( '/' ) ); ?></code> · PHP <?php echo esc_html( PHP_VERSION ); ?></td></tr>
+					<tr><th><?php esc_html_e( 'Allowed Sign-up Domains', 'unfold' ); ?></th><td><code><?php echo esc_html( implode( ', ', Unfold_Accounts::allowed_domains() ) ); ?></code></td></tr>
+					<tr><th><?php esc_html_e( 'SMTP Status', 'unfold' ); ?></th><td><?php echo $smtp['configured'] ? '<span style="color:#067647">' . esc_html( sprintf( __( 'Configured (%1$s:%2$d, %3$s)', 'unfold' ), $smtp['host'], $smtp['port'], $smtp['secure'] ) ) . '</span>' : '<span style="color:#B42318">' . esc_html__( 'Not configured yet (set SMTP above so KAU verification emails send).', 'unfold' ) . '</span>'; ?></td></tr>
+					<tr><th><?php esc_html_e( '3D World Worker', 'unfold' ); ?></th><td><?php echo esc_html( $world_seen ? sprintf( __( 'Last seen %s ago', 'unfold' ), human_time_diff( $world_seen ) ) : __( 'Not seen yet', 'unfold' ) ); ?> · <?php echo $world_auto ? esc_html__( 'Auto-launch configured', 'unfold' ) : esc_html__( 'Auto-launch not configured in wp-config.php', 'unfold' ); ?></td></tr>
+					<tr><th><?php esc_html_e( 'AI Extractor Worker', 'unfold' ); ?></th><td><?php echo esc_html( $extract_seen ? sprintf( __( 'Last seen %s ago', 'unfold' ), human_time_diff( $extract_seen ) ) : __( 'Not seen yet', 'unfold' ) ); ?> · <?php echo $extract_auto ? esc_html__( 'Auto-launch configured', 'unfold' ) : esc_html__( 'Auto-launch not configured in wp-config.php', 'unfold' ); ?></td></tr>
+				</tbody>
+			</table>
 		</div>
 		<?php
 	}
