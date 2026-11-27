@@ -266,7 +266,7 @@ class Unfold_Workflow {
 	 */
 	public static function finish_upload( $upload_id, $post_id = 0 ) {
 		$u = get_transient( 'unfold_upload_' . $upload_id );
-		if ( ! $u || (int) $u['user'] !== get_current_user_id() ) {
+		if ( ! $u || (int) $u['user'] !== get_current_user_id() || ! empty( $u['world'] ) ) {
 			return new WP_Error( 'unfold_upload', __( 'Upload not found or expired.', 'unfold' ), array( 'status' => 404 ) );
 		}
 		$part = self::upload_dir( $upload_id ) . '/part';
@@ -457,7 +457,11 @@ class Unfold_Workflow {
 	 * already polling (a separate lab server, or one started a moment ago).
 	 */
 	public static function launch_extractor() {
-		if ( ! defined( 'UNFOLD_EXTRACT_PYTHON' ) || ! defined( 'UNFOLD_EXTRACT_WORKER' ) || ! function_exists( 'popen' ) ) {
+		$is_win = ( 'Windows' === PHP_OS_FAMILY );
+		if ( ! defined( 'UNFOLD_EXTRACT_PYTHON' ) || ! defined( 'UNFOLD_EXTRACT_WORKER' ) ) {
+			return false;
+		}
+		if ( $is_win ? ! function_exists( 'popen' ) : ! function_exists( 'exec' ) ) {
 			return false;
 		}
 		// When PHP may only read inside the site (open_basedir, as on WordPress Studio) it cannot look
@@ -469,45 +473,54 @@ class Unfold_Workflow {
 			return false;
 		}
 		set_transient( 'unfold_extractor_started', 1, 30 );
-		$q   = static function ( $a ) {
-			return '"' . str_replace( '"', '', $a ) . '"';
-		};
 		$log = WP_CONTENT_DIR . '/unfold-private/extractor.log';
-		$run = $q( UNFOLD_EXTRACT_PYTHON ) . ' -u ' . $q( UNFOLD_EXTRACT_WORKER ) . ' --until-empty > ' . $q( $log ) . ' 2>&1';
-		if ( 'Windows' === PHP_OS_FAMILY ) {
-			pclose( popen( 'start "" /B cmd /C "set UNFOLD_SITE=' . esc_url_raw( home_url() ) . '&& ' . $run . '"', 'r' ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		if ( $is_win ) {
+			$q   = static function ( $a ) {
+				return '"' . str_replace( array( '"', '&', '|', '<', '>', '^', '%' ), '', (string) $a ) . '"';
+			};
+			$run = $q( UNFOLD_EXTRACT_PYTHON ) . ' -u ' . $q( UNFOLD_EXTRACT_WORKER ) . ' --until-empty > ' . $q( $log ) . ' 2>&1';
+			$url = str_replace( array( '"', '&', '|', '<', '>', '^', '%' ), '', esc_url_raw( home_url() ) );
+			pclose( popen( 'start "" /B cmd /C "set "UNFOLD_SITE=' . $url . '" && ' . $run . '"', 'r' ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 		} else {
-			exec( 'UNFOLD_SITE=' . escapeshellarg( home_url() ) . ' nohup ' . $run . ' &' ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
+			$run = escapeshellarg( UNFOLD_EXTRACT_PYTHON ) . ' -u ' . escapeshellarg( UNFOLD_EXTRACT_WORKER ) . ' --until-empty > ' . escapeshellarg( $log ) . ' 2>&1';
+			exec( 'UNFOLD_SITE=' . escapeshellarg( esc_url_raw( home_url() ) ) . ' nohup ' . $run . ' &' ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
 		}
 		return true;
 	}
 
 	/** Oldest queued job, or a claimed one that timed out. Marks it claimed. */
 	public static function claim_job() {
-		$ids = get_posts(
-			array(
-				'post_type'   => Unfold_Post_Type::TYPE,
-				'post_status' => 'any',
-				'numberposts' => 20,
-				'orderby'     => 'modified',
-				'order'       => 'ASC',
-				'fields'      => 'ids',
-				'meta_query'  => array( array( 'key' => '_unfold_state', 'value' => array( 'queued', 'extracting' ), 'compare' => 'IN' ) ), // phpcs:ignore WordPress.DB.SlowDBQuery
-			)
-		);
-		foreach ( $ids as $id ) {
-			$job = get_post_meta( $id, '_unfold_job', true );
-			if ( ! is_array( $job ) ) {
-				continue;
+		$query = static function ( $state ) {
+			return get_posts(
+				array(
+					'post_type'   => Unfold_Post_Type::TYPE,
+					'post_status' => 'any',
+					'numberposts' => 20,
+					'orderby'     => 'modified',
+					'order'       => 'ASC',
+					'fields'      => 'ids',
+					'meta_query'  => array( array( 'key' => '_unfold_state', 'value' => $state ) ), // phpcs:ignore WordPress.DB.SlowDBQuery
+				)
+			);
+		};
+		foreach ( array( 'queued', 'extracting' ) as $target_state ) {
+			foreach ( $query( $target_state ) as $id ) {
+				$job = get_post_meta( $id, '_unfold_job', true );
+				if ( ! is_array( $job ) ) {
+					continue;
+				}
+				if ( 'extracting' === $target_state ) {
+					if ( time() - (int) ( $job['claimed_at'] ?? 0 ) < self::CLAIM_TIMEOUT ) {
+						continue;
+					}
+					// Rotate job id so a timed-out worker cannot overwrite a newer run.
+					$job['id'] = wp_generate_password( 24, false, false );
+				}
+				$job['claimed_at'] = time();
+				update_post_meta( $id, '_unfold_job', $job );
+				self::set_state( $id, 'extracting' );
+				return array( 'post_id' => $id, 'job' => $job );
 			}
-			$state = self::state( $id );
-			if ( 'extracting' === $state && time() - (int) $job['claimed_at'] < self::CLAIM_TIMEOUT ) {
-				continue;
-			}
-			$job['claimed_at'] = time();
-			update_post_meta( $id, '_unfold_job', $job );
-			self::set_state( $id, 'extracting' );
-			return array( 'post_id' => $id, 'job' => $job );
 		}
 		return null;
 	}
@@ -567,11 +580,19 @@ class Unfold_Workflow {
 			return 0;
 		}
 		$wanted = array();
-		foreach ( $data['data_files'] ?? array() as $f ) {
-			$wanted[] = $f['file'] ?? '';
+		if ( is_array( $data['data_files'] ?? null ) ) {
+			foreach ( $data['data_files'] as $f ) {
+				if ( is_array( $f ) && isset( $f['file'] ) && is_string( $f['file'] ) ) {
+					$wanted[] = $f['file'];
+				}
+			}
 		}
-		foreach ( $data['results']['media'] ?? array() as $m ) {
-			$wanted[] = $m['file'] ?? '';
+		if ( is_array( $data['results']['media'] ?? null ) ) {
+			foreach ( $data['results']['media'] as $m ) {
+				if ( is_array( $m ) && isset( $m['file'] ) && is_string( $m['file'] ) ) {
+					$wanted[] = $m['file'];
+				}
+			}
 		}
 		$wanted = array_filter( array_unique( array_map( 'wp_basename', $wanted ) ) );
 		if ( ! $wanted ) {
@@ -603,8 +624,37 @@ class Unfold_Workflow {
 				continue;
 			}
 			$path = $tmp . '/' . sanitize_file_name( $base );
-			file_put_contents( $path, $stream ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+			$out  = fopen( $path, 'wb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+			if ( ! $out ) {
+				fclose( $stream ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+				continue;
+			}
+			$written  = 0;
+			$overflow = false;
+			while ( ! feof( $stream ) ) {
+				$chunk = fread( $stream, 65536 ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+				if ( false === $chunk ) {
+					$overflow = true;
+					break;
+				}
+				$written += strlen( $chunk );
+				if ( $written > self::MAX_ATTACH_BYTES ) {
+					$overflow = true;
+					break;
+				}
+				if ( '' !== $chunk && false === fwrite( $out, $chunk ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions
+					$overflow = true;
+					break;
+				}
+			}
 			fclose( $stream ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+			fclose( $out ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+			if ( $overflow ) {
+				if ( is_file( $path ) ) {
+					wp_delete_file( $path );
+				}
+				continue;
+			}
 			$id = media_handle_sideload( array( 'name' => $base, 'tmp_name' => $path ), $post_id );
 			if ( ! is_wp_error( $id ) ) {
 				update_post_meta( $id, '_unfold_source_name', $base ); // WordPress may rename duplicates (file-2.png).
@@ -629,14 +679,20 @@ class Unfold_Workflow {
 	 * @return array file name => plain explanation
 	 */
 	public static function media_notes( $post_id, $data ) {
+		if ( ! is_array( $data['results']['media'] ?? null ) ) {
+			return array();
+		}
 		$have  = Unfold_Render::attachments( $post_id );
 		$files = array();
 		foreach ( self::manifest( $post_id )['files'] ?? array() as $f ) {
 			$files[ wp_basename( $f['path'] ) ] = $f;
 		}
 		$notes = array();
-		foreach ( $data['results']['media'] ?? array() as $m ) {
-			$name = wp_basename( (string) ( $m['file'] ?? '' ) );
+		foreach ( $data['results']['media'] as $m ) {
+			if ( ! is_array( $m ) || ! is_string( $m['file'] ?? null ) ) {
+				continue;
+			}
+			$name = wp_basename( $m['file'] );
 			if ( '' === $name ) {
 				continue;
 			}
@@ -687,7 +743,7 @@ class Unfold_Workflow {
 	public static function review( $post_id, $decision, $note ) {
 		$data = Unfold_Store::get( $post_id );
 		if ( 'approve' === $decision ) {
-			if ( ! $data ) {
+			if ( ! $data || Unfold_Store::get_errors( $post_id ) ) {
 				return new WP_Error( 'unfold_invalid', __( 'This project has no valid data to publish.', 'unfold' ), array( 'status' => 400 ) );
 			}
 			$data['review']['instructor_approved'] = true;

@@ -27,7 +27,7 @@ class Unfold_Accounts {
 		add_action( 'admin_init', array( __CLASS__, 'keep_out_of_admin' ) );
 		add_filter( 'show_admin_bar', array( __CLASS__, 'admin_bar' ) );
 		add_filter( 'login_redirect', array( __CLASS__, 'login_redirect' ), 10, 3 );
-		add_filter( 'wp_authenticate_user', array( __CLASS__, 'block_unverified' ) );
+		add_filter( 'wp_authenticate_user', array( __CLASS__, 'block_unverified' ), 10, 2 );
 		add_shortcode( 'unfold_login', array( __CLASS__, 'login_shortcode' ) );
 		add_shortcode( 'unfold_register', array( __CLASS__, 'register_shortcode' ) );
 		add_action( 'phpmailer_init', array( __CLASS__, 'smtp' ) );
@@ -137,8 +137,8 @@ class Unfold_Accounts {
 	}
 
 	/** Blocks sign-in until the email is confirmed (accounts made by the admin are not affected). */
-	public static function block_unverified( $user ) {
-		if ( $user instanceof WP_User && self::is_unverified( $user->ID ) ) {
+	public static function block_unverified( $user, $password = '' ) {
+		if ( $user instanceof WP_User && self::is_unverified( $user->ID ) && wp_check_password( (string) $password, $user->user_pass, $user->ID ) ) {
 			return new WP_Error( 'unfold_unverified', __( 'Confirm your email first: open the link we sent you.', 'unfold' ) );
 		}
 		return $user;

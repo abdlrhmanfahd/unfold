@@ -287,6 +287,9 @@ class Unfold_Rest {
 		if ( ! $file ) {
 			return new WP_Error( 'unfold_nozip', 'ZIP missing.', array( 'status' => 404 ) );
 		}
+		while ( ob_get_level() > 0 ) {
+			ob_end_clean();
+		}
 		nocache_headers();
 		header( 'Content-Type: application/zip' );
 		header( 'Content-Length: ' . filesize( $file ) );
