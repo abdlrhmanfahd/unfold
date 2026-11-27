@@ -360,6 +360,10 @@ class Unfold_Portals {
 	private static function review_screen( $id ) {
 		$state = Unfold_Workflow::state( $id );
 		$data  = Unfold_Store::get( $id );
+		if ( ! $data ) {
+			$decoded = json_decode( Unfold_Store::get_raw( $id ), true );
+			$data    = is_array( $decoded ) ? $decoded : null;
+		}
 		$owner = get_userdata( (int) get_post_field( 'post_author', $id ) );
 
 		wp_enqueue_style( 'unfold' );
@@ -387,7 +391,7 @@ class Unfold_Portals {
 				. '<div class="uf-decision-btns"><button class="uf-btn uf-btn--ghost" type="submit" name="decision" value="unpublish">' . esc_html__( 'Take offline and return with notes', 'unfold' ) . '</button></div>';
 		} elseif ( 'submitted' === $state ) {
 			$side .= '<label class="uf-field"><span>' . esc_html__( 'Notes', 'unfold' ) . '</span><textarea name="note" rows="5" placeholder="' . esc_attr__( 'Needed when you return the project. Optional when you accept.', 'unfold' ) . '"></textarea></label>'
-				. '<div class="uf-decision-btns"><button class="uf-btn uf-btn--approve" type="submit" name="decision" value="approve"' . ( $data ? '' : ' disabled' ) . '>' . esc_html__( 'Accept & publish', 'unfold' ) . '</button>'
+				. '<div class="uf-decision-btns"><button class="uf-btn uf-btn--approve" type="submit" name="decision" value="approve">' . esc_html__( 'Accept & publish', 'unfold' ) . '</button>'
 				. '<button class="uf-btn uf-btn--ghost" type="submit" name="decision" value="changes">' . esc_html__( 'Return with notes', 'unfold' ) . '</button></div>';
 		} else {
 			$side .= '<p class="uf-muted">' . esc_html__( 'Not submitted for review yet.', 'unfold' ) . '</p>';

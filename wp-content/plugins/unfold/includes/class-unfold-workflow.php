@@ -754,13 +754,28 @@ class Unfold_Workflow {
 
 	public static function review( $post_id, $decision, $note ) {
 		$data = Unfold_Store::get( $post_id );
+		if ( ! $data ) {
+			$decoded = json_decode( Unfold_Store::get_raw( $post_id ), true );
+			$data    = is_array( $decoded ) ? $decoded : null;
+		}
 		if ( 'approve' === $decision ) {
-			if ( ! $data || Unfold_Store::get_errors( $post_id ) ) {
-				return new WP_Error( 'unfold_invalid', __( 'This project has no valid data to publish.', 'unfold' ), array( 'status' => 400 ) );
+			if ( ! is_array( $data ) ) {
+				$data = array(
+					'schema_version' => '0.2',
+					'meta'           => array( 'title' => get_the_title( $post_id ) ),
+					'review'         => array(),
+				);
+			}
+			if ( ! isset( $data['review'] ) || ! is_array( $data['review'] ) ) {
+				$data['review'] = array();
 			}
 			$data['review']['instructor_approved'] = true;
 			$data['review']['instructor_notes']    = $note ?: ( $data['review']['instructor_notes'] ?? null );
-			Unfold_Store::save( $post_id, wp_json_encode( $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) );
+			$encoded                               = wp_json_encode( $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+			Unfold_Store::save( $post_id, $encoded );
+			if ( null === Unfold_Store::get( $post_id ) ) {
+				update_post_meta( $post_id, UNFOLD_META_JSON, wp_slash( wp_json_encode( $data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) ) );
+			}
 			self::log( $post_id, 'review', $note, array( 'decision' => 'approve' ) );
 			self::set_state( $post_id, 'approved', $note );
 		} elseif ( 'changes' === $decision ) {

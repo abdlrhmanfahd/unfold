@@ -279,13 +279,41 @@
 	function parseCSV( text ) {
 		var rows = text.replace( /\r/g, '' ).split( '\n' ).filter( function ( l ) { return l.trim() !== ''; } );
 		var head = rows.shift().split( ',' ).map( function ( h ) { return h.trim().replace( /^"|"$/g, '' ); } );
-		var cols = head.map( function () { return []; } );
+		var raw = head.map( function () { return []; } );
+		var num = head.map( function () { return []; } );
 		rows.forEach( function ( r ) {
 			r.split( ',' ).forEach( function ( v, i ) {
-				if ( i < cols.length ) cols[ i ].push( parseFloat( v ) );
+				if ( i >= raw.length ) return;
+				var cell = v.trim().replace( /^"|"$/g, '' );
+				raw[ i ].push( cell );
+				num[ i ].push( cell === '' ? NaN : parseFloat( cell ) );
 			} );
 		} );
-		return { head: head, cols: cols };
+		return { head: head, raw: raw, num: num };
+	}
+
+	function isNumericCol( col ) {
+		var nonEmpty = 0, finite = 0;
+		for ( var i = 0; i < col.raw.length; i++ ) {
+			if ( col.raw[ i ] !== '' ) {
+				nonEmpty++;
+				if ( Number.isFinite( col.num[ i ] ) ) finite++;
+			}
+		}
+		return nonEmpty > 0 && finite * 2 >= nonEmpty;
+	}
+
+	function isMonotonic( nums ) {
+		var pairs = 0, inc = 0, prev = null;
+		for ( var i = 0; i < nums.length; i++ ) {
+			if ( ! Number.isFinite( nums[ i ] ) ) continue;
+			if ( prev !== null ) {
+				pairs++;
+				if ( nums[ i ] >= prev ) inc++;
+			}
+			prev = nums[ i ];
+		}
+		return pairs === 0 || inc / pairs >= 0.9;
 	}
 
 	root.querySelectorAll( '[data-uf-csv]' ).forEach( function ( el ) {
@@ -307,28 +335,51 @@
 			.then( function ( txt ) {
 				var d = parseCSV( txt );
 				var lab = function ( n ) { return units[ n ] ? n + ' [' + units[ n ] + ']' : n; };
+				var allIdx = [];
+				for ( var k = 0; k < d.head.length; k++ ) allIdx.push( k );
 				var idx = declared.length >= 2
 					? declared.map( function ( n ) { return d.head.indexOf( n ); } ).filter( function ( i ) { return i >= 0; } )
-					: d.head.map( function ( _, i ) { return i; } );
+					: allIdx;
 				if ( idx.length < 2 ) {
 					throw new Error( 'declared columns not found in file' );
 				}
 				var xi = idx[ 0 ];
-				var traces = idx.slice( 1 ).map( function ( i ) {
-					return { x: d.cols[ xi ], y: d.cols[ i ], name: lab( d.head[ i ] ), mode: 'lines', type: 'scatter', line: { width: 1.6 } };
+				var xNumeric = isNumericCol( { raw: d.raw[ xi ], num: d.num[ xi ] } );
+				var xVals = xNumeric ? d.num[ xi ] : d.raw[ xi ];
+				var yCols = idx.slice( 1 ).filter( function ( colIdx ) {
+					return d.num[ colIdx ].some( Number.isFinite );
+				} );
+				if ( ! yCols.length ) {
+					yCols = allIdx.filter( function ( colIdx ) {
+						return colIdx !== xi && d.num[ colIdx ].some( Number.isFinite );
+					} ).slice( 0, 3 );
+				}
+				if ( ! yCols.length ) {
+					throw new Error( 'no numeric y columns in file' );
+				}
+				var traceOpts = ! xNumeric
+					? { mode: 'lines+markers', marker: { size: 5 }, line: { width: 1.6 } }
+					: ( isMonotonic( d.num[ xi ] )
+						? { mode: 'lines', line: { width: 1.6 } }
+						: { mode: 'markers', marker: { size: 5, opacity: 0.8 } } );
+				var traces = yCols.map( function ( i ) {
+					var tr = { x: xVals, y: d.num[ i ], name: lab( d.head[ i ] ), type: 'scatter', mode: traceOpts.mode };
+					if ( traceOpts.line ) tr.line = traceOpts.line;
+					if ( traceOpts.marker ) tr.marker = traceOpts.marker;
+					return tr;
 				} );
 				el.innerHTML = '';
 				window.Plotly.newPlot( el, traces, {
-					margin: { l: 56, r: 16, t: 16, b: 48 },
+					margin: { l: 56, r: 16, t: traces.length > 1 ? 52 : 18, b: 54 },
 					showlegend: traces.length > 1,
-					xaxis: { title: { text: lab( d.head[ xi ] ) } },
+					xaxis: { title: { text: lab( d.head[ xi ] ), standoff: 10 }, automargin: true },
 					// Same unit on both axes (e.g. an x–y route in metres): keep true proportions.
 					yaxis: traces.length === 1
-						? ( units[ d.head[ xi ] ] && units[ d.head[ xi ] ] === units[ d.head[ idx[ 1 ] ] ] && units[ d.head[ xi ] ] !== 's'
-							? { title: { text: traces[ 0 ].name }, scaleanchor: 'x', scaleratio: 1 }
-							: { title: { text: traces[ 0 ].name } } )
-						: {},
-					legend: { orientation: 'h', y: -0.2 },
+						? ( xNumeric && units[ d.head[ xi ] ] && units[ d.head[ xi ] ] === units[ d.head[ yCols[ 0 ] ] ] && units[ d.head[ xi ] ] !== 's'
+							? { title: { text: traces[ 0 ].name }, scaleanchor: 'x', scaleratio: 1, automargin: true }
+							: { title: { text: traces[ 0 ].name }, automargin: true } )
+						: { automargin: true },
+					legend: { orientation: 'h', x: 0, y: 1.02, yanchor: 'bottom' },
 					font: { family: 'inherit' },
 					paper_bgcolor: 'rgba(0,0,0,0)',
 					plot_bgcolor: 'rgba(0,0,0,0)',
