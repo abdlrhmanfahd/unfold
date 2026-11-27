@@ -24,17 +24,21 @@ if ( ! post_type_exists( 'unfold_project' ) ) {
 	exit( 1 );
 }
 
-$sample_path = __DIR__ . '/fixtures/valid-project.json';
-$raw         = file_get_contents( $sample_path );
-if ( false === $raw ) {
-	fwrite( STDERR, "FAIL: Could not read {$sample_path}\n" );
-	exit( 1 );
+foreach ( array( __DIR__ . '/fixtures/valid-project.json', UNFOLD_DIR . 'sample/warehouse-fleet.json' ) as $sample_path ) {
+	$raw = file_get_contents( $sample_path );
+	if ( false === $raw ) {
+		fwrite( STDERR, "FAIL: Could not read {$sample_path}\n" );
+		exit( 1 );
+	}
+
+	$result = Unfold_Validator::validate_raw( $raw );
+	if ( ! empty( $result['errors'] ) || ! is_array( $result['data'] ) ) {
+		fwrite( STDERR, "FAIL: JSON validation failed for {$sample_path}:\n" . implode( "\n", $result['errors'] ) . "\n" );
+		exit( 1 );
+	}
 }
 
-$result = Unfold_Validator::validate_raw( $raw );
-if ( ! empty( $result['errors'] ) || ! is_array( $result['data'] ) ) {
-	fwrite( STDERR, "FAIL: Sample JSON validation failed:\n" . implode( "\n", $result['errors'] ) . "\n" );
-	exit( 1 );
-}
+do_shortcode( '[unfold_featured]' );
+do_shortcode( '[unfold_facts]' );
 
 echo "OK: Unfold Studio smoke test passed.\n";

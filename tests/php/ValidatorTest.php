@@ -71,4 +71,14 @@ final class ValidatorTest extends TestCase {
 		$this->assertNull( $result['data'] );
 		$this->assertNotEmpty( $result['errors'] );
 	}
+
+	public function test_shipped_sample_warehouse_fleet_passes(): void {
+		$raw = file_get_contents( UNFOLD_DIR . 'sample/warehouse-fleet.json' );
+		$this->assertIsString( $raw );
+
+		$result = Unfold_Validator::validate_raw( $raw );
+
+		$this->assertSame( array(), $result['errors'] );
+		$this->assertIsArray( $result['data'] );
+	}
 }

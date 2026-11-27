@@ -271,9 +271,8 @@
       "code_files": [],
       "sim": {
         "type": "conceptual",
-        "file": "pi-speed-conceptual.html",
-        "data_file": null,
-        "student_approved": false
+        "student_approved": false,
+        "template": null
       }
     }
   ],
