@@ -121,6 +121,8 @@ class ExtractorWorkerTests(unittest.TestCase):
         self.assertEqual(data["results"]["metrics"][0]["value"]["value"], 96.0)
         self.assertEqual(data["data_files"][0]["format"], "csv")
         self.assertNotIn("type", data["results"]["media"][0])
+        for sub in data["subsystems"]:
+            self.assertLessEqual(len(sub["name"].split()), 3)
 
     def test_gemini_client_parses_response(self):
         fake_resp = mock.Mock()
