@@ -1145,7 +1145,13 @@ class LLMClient:
                     "temperature": 0.1,
                 },
             }
-            r = requests.post(url, headers={"x-goog-api-key": key}, json=payload, timeout=180)
+            r = None
+            for try_idx in range(3):
+                r = requests.post(url, headers={"x-goog-api-key": key}, json=payload, timeout=180)
+                if r.status_code not in (500, 502, 503, 504) or try_idx == 2:
+                    break
+                log.warning("gemini returned HTTP %s, retrying...", r.status_code)
+                time.sleep(3 * (try_idx + 1))
             if r.status_code in (401, 403):
                 raise RuntimeError("Gemini API key is invalid or unauthorized. Check GEMINI_API_KEY.")
             if r.status_code == 429:
@@ -1879,7 +1885,13 @@ def generate_cover_image(client: LLMClient, data: dict) -> tuple[bytes, str, str
     if client.provider == "gemini":
         key = client.api_key or os.environ.get("GEMINI_API_KEY") or read_secret_file("gemini-key.txt")
         if key:
-            for img_model in GEMINI_IMAGE_MODELS:
+            candidate_models: list[str] = []
+            if client.model:
+                candidate_models.append(client.model)
+            for m in GEMINI_IMAGE_MODELS:
+                if m not in candidate_models:
+                    candidate_models.append(m)
+            for img_model in candidate_models:
                 try:
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{img_model}:generateContent"
                     r = requests.post(

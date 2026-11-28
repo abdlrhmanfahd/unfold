@@ -139,6 +139,23 @@ class ExtractorWorkerTests(unittest.TestCase):
                 self.assertEqual(meta["usage"]["input_tokens"], 120)
                 self.assertTrue(post.called)
 
+    def test_gemini_client_retries_transient_503(self):
+        err_resp = mock.Mock()
+        err_resp.status_code = 503
+        ok_resp = mock.Mock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": '{"schema_version": "0.2", "ok": true}'}]}}],
+            "usageMetadata": {"promptTokenCount": 50, "candidatesTokenCount": 10},
+        }
+        with mock.patch.object(uw.time, "sleep") as sleep_mock:
+            with mock.patch.object(uw.requests, "post", side_effect=[err_resp, ok_resp]) as post:
+                client = uw.LLMClient("gemini", api_key="demo-gemini-value-1")
+                res, _ = client.ask_json("sys", [{"type": "text", "text": "hello"}])
+                self.assertTrue(res["ok"])
+                self.assertEqual(post.call_count, 2)
+                self.assertTrue(sleep_mock.called)
+
     def test_ollama_client_parses_response(self):
         fake_resp = mock.Mock()
         fake_resp.status_code = 200
@@ -261,22 +278,32 @@ class ExtractorWorkerTests(unittest.TestCase):
     def test_generate_cover_image_uses_gemini_25_flash_image_with_header_key(self):
         import base64 as b64
         fake_png = b"\x89PNG\r\n\x1a\n" + b"1" * 1024
-        fake_resp = mock.Mock()
-        fake_resp.ok = True
-        fake_resp.json.return_value = {
+        ok_resp = mock.Mock()
+        ok_resp.ok = True
+        ok_resp.json.return_value = {
             "candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": b64.standard_b64encode(fake_png).decode()}}]}}]
         }
-        with mock.patch.object(uw.requests, "post", return_value=fake_resp) as post_mock:
-            client = uw.LLMClient("gemini", api_key="demo-gemini-value-1")
+        with mock.patch.object(uw.requests, "post", return_value=ok_resp) as post_mock:
+            client = uw.LLMClient("gemini", model="gemini-4-hydrogen", api_key="demo-gemini-value-1")
             res = uw.generate_cover_image(client, {"meta": {"title": "Safe Stopping", "short_description": "LiDAR obstacle avoidance"}})
             self.assertIsNotNone(res)
             img_bytes, mime, prompt = res
             self.assertEqual(img_bytes, fake_png)
             self.assertEqual(mime, "image/png")
             self.assertIn("2D vector illustration", prompt)
-            self.assertIn("gemini-2.5-flash-image:generateContent", post_mock.call_args.args[0])
+            self.assertIn("gemini-4-hydrogen:generateContent", post_mock.call_args.args[0])
             self.assertEqual(post_mock.call_args.kwargs["headers"]["x-goog-api-key"], "demo-gemini-value-1")
             self.assertNotIn("params", post_mock.call_args.kwargs)
+
+        bad_resp = mock.Mock()
+        bad_resp.ok = False
+        bad_resp.status_code = 400
+        with mock.patch.object(uw.requests, "post", side_effect=[bad_resp, ok_resp]) as post_mock:
+            client = uw.LLMClient("gemini", model="gemini-2.5-flash", api_key="demo-gemini-value-1")
+            res = uw.generate_cover_image(client, {"meta": {"title": "Safe Stopping", "short_description": "LiDAR obstacle avoidance"}})
+            self.assertIsNotNone(res)
+            self.assertIn("gemini-2.5-flash:generateContent", post_mock.call_args_list[0].args[0])
+            self.assertIn("gemini-2.5-flash-image:generateContent", post_mock.call_args_list[1].args[0])
 
     def test_build_context_includes_extra_docs_md_csv_stats_and_deep_code(self):
         docx_buf = io.BytesIO()
