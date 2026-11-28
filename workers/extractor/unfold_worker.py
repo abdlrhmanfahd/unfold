@@ -1145,7 +1145,13 @@ class LLMClient:
                     "temperature": 0.1,
                 },
             }
-            r = requests.post(url, headers={"x-goog-api-key": key}, json=payload, timeout=180)
+            r = None
+            for try_idx in range(3):
+                r = requests.post(url, headers={"x-goog-api-key": key}, json=payload, timeout=180)
+                if r.status_code not in (500, 502, 503, 504) or try_idx == 2:
+                    break
+                log.warning("gemini returned HTTP %s, retrying...", r.status_code)
+                time.sleep(3 * (try_idx + 1))
             if r.status_code in (401, 403):
                 raise RuntimeError("Gemini API key is invalid or unauthorized. Check GEMINI_API_KEY.")
             if r.status_code == 429:

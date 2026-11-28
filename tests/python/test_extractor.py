@@ -139,6 +139,23 @@ class ExtractorWorkerTests(unittest.TestCase):
                 self.assertEqual(meta["usage"]["input_tokens"], 120)
                 self.assertTrue(post.called)
 
+    def test_gemini_client_retries_transient_503(self):
+        err_resp = mock.Mock()
+        err_resp.status_code = 503
+        ok_resp = mock.Mock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": '{"schema_version": "0.2", "ok": true}'}]}}],
+            "usageMetadata": {"promptTokenCount": 50, "candidatesTokenCount": 10},
+        }
+        with mock.patch.object(uw.time, "sleep") as sleep_mock:
+            with mock.patch.object(uw.requests, "post", side_effect=[err_resp, ok_resp]) as post:
+                client = uw.LLMClient("gemini", api_key="demo-gemini-value-1")
+                res, _ = client.ask_json("sys", [{"type": "text", "text": "hello"}])
+                self.assertTrue(res["ok"])
+                self.assertEqual(post.call_count, 2)
+                self.assertTrue(sleep_mock.called)
+
     def test_ollama_client_parses_response(self):
         fake_resp = mock.Mock()
         fake_resp.status_code = 200
