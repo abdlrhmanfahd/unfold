@@ -94,8 +94,10 @@ depth (RealSense depth camera), csi (360 cameras), lights, wifi.
 - meta.question: the project's question in one short plain line (at most 90 characters, e.g. "Can software fix bent wheels?"). \
 meta.short_description: always write it - 2-3 plain sentences shown right under the title on the \
 project page: what the project builds or tests, how, and on what (a non-specialist must follow it), from \
-the report only. meta.headline: the one result that answers it, as before/after numbers from the report with a short \
-label (at most 60 characters, e.g. "Tracking loss, without -> with the fix"); null if the report has no such pair.
+the report only. meta.headline: the one primary evaluation result that answers it (always pick the main \
+overall objective/loss/safety benchmark from the abstract or primary results table before secondary counts), \
+as before/after numbers from the report with a short label (at most 60 characters, e.g. \
+"Mean paired block loss, immediate -> 1.0 s dwell"); null if the report has no such pair.
 - sim: choose a template only when it models the part; otherwise null. Templates and their inputs:
   * path_follow (Stanley-type steering along a route, with an optional steering bias and its correction). \
 Inputs: k, v_soft, dmax (rad), b (bias, rad), bhat (correction, rad), ref_off (m), corridor (m), \
@@ -1121,7 +1123,7 @@ class LLMClient:
             return DEFAULT_ANTHROPIC_MODEL
         return "local_rules"
 
-    def _gemini_json(self, system: str, parts: list[dict], max_tokens: int, on_progress=None) -> tuple[dict, dict]:
+    def _gemini_json(self, system: str, parts: list[dict], max_tokens: int, on_progress=None, timeout: int = 120) -> tuple[dict, dict]:
         key = self.api_key or os.environ.get("GEMINI_API_KEY") or read_secret_file("gemini-key.txt")
         if not key:
             raise RuntimeError("Missing GEMINI_API_KEY (or gemini-key.txt). Get a free key from Google AI Studio.")
@@ -1145,18 +1147,33 @@ class LLMClient:
                 "generationConfig": {
                     "responseMimeType": "application/json",
                     "maxOutputTokens": max_tokens,
-                    "temperature": 0.1,
+                    "temperature": 0.0,
                 },
             }
             r = None
+            last_req_err = None
             for try_idx in range(3):
-                r = requests.post(url, headers={"x-goog-api-key": key}, json=payload, timeout=180)
+                try:
+                    r = requests.post(url, headers={"x-goog-api-key": key}, json=payload, timeout=timeout)
+                    last_req_err = None
+                except (requests.Timeout, requests.ConnectionError) as exc:
+                    last_req_err = exc
+                    r = None
+                    log.warning("gemini request error (%s), retrying...", type(exc).__name__)
+                    if try_idx < 2:
+                        if on_progress:
+                            on_progress("ai", f"Waiting for {self.model}…", 50, "Connection timed out, retrying…", 0)
+                        time.sleep(3 * (try_idx + 1))
+                        continue
+                    raise
                 if r.status_code not in (500, 502, 503, 504) or try_idx == 2:
                     break
                 log.warning("gemini returned HTTP %s, retrying...", r.status_code)
                 if on_progress:
                     on_progress("ai", f"Waiting for {self.model}…", 50, f"Temporary HTTP {r.status_code}, retrying…", 0)
                 time.sleep(3 * (try_idx + 1))
+            if last_req_err is not None:
+                raise last_req_err
             if r.status_code in (401, 403):
                 raise RuntimeError("Gemini API key is invalid or unauthorized. Check GEMINI_API_KEY.")
             if r.status_code == 429:
@@ -1327,9 +1344,9 @@ class LLMClient:
                 messages = messages + [{"role": "assistant", "content": text}, {"role": "user", "content": f"Invalid JSON ({e.msg}). Reply with corrected JSON only."}]
         raise RuntimeError("unreachable")
 
-    def ask_json(self, system: str, parts: list[dict], max_tokens: int = 32768, on_progress=None) -> tuple[dict, dict]:
+    def ask_json(self, system: str, parts: list[dict], max_tokens: int = 32768, on_progress=None, timeout: int | None = None) -> tuple[dict, dict]:
         if self.provider == "gemini":
-            return self._gemini_json(system, parts, max_tokens, on_progress=on_progress)
+            return self._gemini_json(system, parts, max_tokens, on_progress=on_progress, timeout=timeout or 120)
         if self.provider == "ollama":
             return self._ollama_json(system, parts, on_progress=on_progress)
         if self.provider == "openai_compat":
@@ -1822,15 +1839,26 @@ def brief_score(client: LLMClient, zip_bytes: bytes, files: list[dict], report: 
     briefs = find_briefs(files, report)
     if not briefs or not report:
         return None
+
+    def _ask_brief(prompt: str, q_parts: list[dict]) -> tuple[dict, dict]:
+        try:
+            return client.ask_json(prompt, q_parts, max_tokens=16384, timeout=90)
+        except (RuntimeError, requests.RequestException) as exc:
+            if client.provider == "gemini" and client.model != DEFAULT_GEMINI_MODEL:
+                log.warning("brief check fell back to %s after %s error (%s)", DEFAULT_GEMINI_MODEL, client.model, exc)
+                fallback = LLMClient(provider="gemini", model=DEFAULT_GEMINI_MODEL, api_key=client.api_key)
+                return fallback.ask_json(prompt, q_parts, max_tokens=16384, timeout=90)
+            raise
+
     parts = [doc_part(z, b) for b in briefs]
     parts.append({"type": "text", "text": f'The project being checked: report file "{PurePosixPath(report).name}", title "{title}". List the checklist from the brief above.'})
-    checklist, meta = client.ask_json(CHECKLIST_PROMPT, parts, max_tokens=16384)
+    checklist, meta = _ask_brief(CHECKLIST_PROMPT, parts)
     items = [i for i in checklist.get("items", []) if isinstance(i, dict) and str(i.get("text", "")).strip()][:25]
     if not items:
         return None
     numbered = "\n".join(f'{k}. {i["text"]}  [brief: "{i.get("quote") or ""}"]' for k, i in enumerate(items))
     v_parts = [doc_part(z, report), {"type": "text", "text": f"Other files in the project's ZIP:\n\n{build_context(z, files, report)}\n\nChecklist:\n{numbered}"}]
-    verdicts, meta = client.ask_json(JUDGE_PROMPT, v_parts, max_tokens=16384)
+    verdicts, meta = _ask_brief(JUDGE_PROMPT, v_parts)
     by_id = {int(v.get("id", -1)): v for v in verdicts.get("items", []) if isinstance(v, dict)}
     out = []
     for k, i in enumerate(items):
@@ -1926,22 +1954,29 @@ def generate_cover_image(client: LLMClient, data: dict) -> tuple[bytes, str, str
             for img_model in candidate_models:
                 try:
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{img_model}:generateContent"
-                    r = requests.post(
-                        url,
-                        headers={"x-goog-api-key": key},
-                        json={
-                            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                            "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
-                        },
-                        timeout=60,
-                    )
-                    if r.ok:
-                        for pt in (((r.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or []):
-                            inl = pt.get("inlineData") or {}
-                            if inl.get("data"):
-                                return base64.standard_b64decode(inl["data"]), inl.get("mimeType") or "image/png", prompt
-                    else:
-                        log.warning("gemini image model %s returned HTTP %s", img_model, r.status_code)
+                    for img_try in range(2):
+                        r = requests.post(
+                            url,
+                            headers={"x-goog-api-key": key},
+                            json={
+                                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                                "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
+                            },
+                            timeout=60,
+                        )
+                        if r.ok:
+                            for pt in (((r.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or []):
+                                inl = pt.get("inlineData") or {}
+                                if inl.get("data"):
+                                    return base64.standard_b64decode(inl["data"]), inl.get("mimeType") or "image/png", prompt
+                            break
+                        if r.status_code in (429, 503) and img_try == 0:
+                            log.warning("gemini image model %s returned HTTP %s, retrying shortly...", img_model, r.status_code)
+                            time.sleep(5)
+                            continue
+                        err_hint = re.sub(r"\s+", " ", (r.text or "")).strip()[:160]
+                        log.warning("gemini image model %s returned HTTP %s (%s)", img_model, r.status_code, err_hint)
+                        break
                 except Exception:  # noqa: BLE001
                     log.debug("gemini image generation unavailable for %s", img_model, exc_info=True)
 
@@ -1997,11 +2032,8 @@ def handle(site: Site, client: LLMClient, job: dict) -> None:
         log.exception("extraction failed")
         site.result(job, {"error": str(e)[:400]})
         return
-    report_progress("saving", "Validating schema & attaching files…", 90, f"{meta['usage']['output_tokens']} output tokens")
-    res = site.result(job, {"data": data, "meta": meta})
-    log.info("done: %s output tokens, %d schema problems, %d files attached",
-             meta["usage"]["output_tokens"], len(res.get("schema_errors", [])), res.get("attached", 0))
     try:
+        report_progress("ai", "Evaluating against assignment brief (0–100)…", 82)
         score = brief_score(active_client, zip_bytes, job["files"], job.get("report"), (data.get("meta") or {}).get("title") or "")
         if score:
             r = site.s.post(site.route(f"/worker/projects/{job['project_id']}/brief-score"), json=score, timeout=60)
@@ -2009,6 +2041,7 @@ def handle(site: Site, client: LLMClient, job: dict) -> None:
     except Exception:  # noqa: BLE001
         log.exception("brief check failed (the project is not affected)")
     try:
+        report_progress("ai", "Generating cover illustration…", 88)
         cover = generate_cover_image(active_client, data)
         if cover:
             img_bytes, mime_type, cover_prompt = cover
@@ -2025,6 +2058,10 @@ def handle(site: Site, client: LLMClient, job: dict) -> None:
             log.info("uploaded AI cover illustration for project %s", job["project_id"])
     except Exception:  # noqa: BLE001
         log.exception("cover illustration failed (the project is not affected)")
+    report_progress("saving", "Validating schema & attaching files…", 95, f"{meta['usage']['output_tokens']} output tokens")
+    res = site.result(job, {"data": data, "meta": meta})
+    log.info("done: %s output tokens, %d schema problems, %d files attached",
+             meta["usage"]["output_tokens"], len(res.get("schema_errors", [])), res.get("attached", 0))
 
 
 def default_schema_path() -> str:

@@ -247,7 +247,31 @@ class ExtractorWorkerTests(unittest.TestCase):
         self.assertEqual(payload["meta"]["model"], "local_rules")
         self.assertEqual(payload["data"]["schema_version"], "0.2")
         stages = [call.args[1] for call in fake_site.progress.call_args_list]
-        self.assertEqual(stages, ["downloading", "scanning", "saving"])
+        self.assertEqual(stages, ["downloading", "scanning", "ai", "ai", "saving"])
+
+    def test_brief_score_falls_back_to_default_gemini_model_on_timeout(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("report.pdf", b"%PDF-1.4\nstream\nBT\n(Final Study Report)\nET\nendstream\n%%EOF")
+            z.writestr("activity_brief.pdf", b"%PDF-1.4\nstream\nBT\n(Requirement 1: Safe stopping)\nET\nendstream\n%%EOF")
+        files = [
+            {"path": "report.pdf", "size": 100, "kind": "report", "blocked": False},
+            {"path": "activity_brief.pdf", "size": 100, "kind": "report", "blocked": False},
+        ]
+        client = uw.LLMClient("gemini", model="gemini-4-hydrogen", api_key="demo-gemini-value-1")
+        with mock.patch.object(
+            uw.LLMClient,
+            "ask_json",
+            side_effect=[
+                uw.requests.ReadTimeout("timeout"),
+                ({"items": [{"text": "Safe stopping", "quote": "Safe stopping", "source": "p.1", "weight": 1}]}, {"model": "gemini-2.5-flash", "usage": {}}),
+                ({"items": [{"id": 0, "verdict": "met", "evidence": "Passed", "where": "Sec 3"}]}, {"model": "gemini-2.5-flash", "usage": {}}),
+            ],
+        ):
+            score = uw.brief_score(client, buf.getvalue(), files, "report.pdf", "Test")
+            self.assertIsNotNone(score)
+            self.assertEqual(score["model"], "gemini-2.5-flash")
+            self.assertEqual(score["items"][0]["verdict"], "met")
 
     def test_build_cover_prompt_uses_required_vector_style(self):
         prompt = uw.build_cover_prompt({
