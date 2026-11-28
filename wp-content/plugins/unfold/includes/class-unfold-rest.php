@@ -51,6 +51,7 @@ class Unfold_Rest {
 		// Extraction worker.
 		register_rest_route( self::NS, '/worker/next', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'worker_next' ), 'permission_callback' => $worker ) );
 		register_rest_route( self::NS, '/worker/jobs/(?P<id>\d+)/zip', array( 'methods' => 'GET', 'callback' => array( __CLASS__, 'worker_zip' ), 'permission_callback' => $worker ) );
+		register_rest_route( self::NS, '/worker/jobs/(?P<id>\d+)/progress', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'worker_progress' ), 'permission_callback' => $worker ) );
 		register_rest_route( self::NS, '/worker/jobs/(?P<id>\d+)/result', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'worker_result' ), 'permission_callback' => $worker ) );
 		register_rest_route( self::NS, '/worker/projects/(?P<id>\d+)/brief-score', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'worker_brief_score' ), 'permission_callback' => $worker ) );
 		register_rest_route( self::NS, '/worker/projects/(?P<id>\d+)/cover-image', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'worker_cover_image' ), 'permission_callback' => $worker ) );
@@ -147,7 +148,7 @@ class Unfold_Rest {
 			'data'       => is_array( $data ) ? $data : null,
 			'errors'     => Unfold_Store::get_errors( $id ),
 			'valid'      => (bool) Unfold_Store::get( $id ) && ! Unfold_Store::get_errors( $id ),
-			'job'        => is_array( $job ) ? array( 'error' => $job['error'] ?? null, 'queued_at' => $job['queued_at'] ?? null, 'claimed_at' => $job['claimed_at'] ?? null ) : null,
+			'job'        => is_array( $job ) ? array( 'error' => $job['error'] ?? null, 'queued_at' => $job['queued_at'] ?? null, 'claimed_at' => $job['claimed_at'] ?? null, 'progress' => $job['progress'] ?? null ) : null,
 			'manifest'   => array( 'totals' => $man['totals'] ?? array(), 'count' => count( $man['files'] ?? array() ), 'reports' => array_values( array_map( static function ( $f ) { return $f['path']; }, array_filter( $man['files'] ?? array(), static function ( $f ) { return 'report' === $f['kind']; } ) ) ) ),
 			'report'     => get_post_meta( $id, '_unfold_report', true ),
 			'zip'        => get_post_meta( $id, '_unfold_zip_name', true ),
@@ -343,6 +344,29 @@ class Unfold_Rest {
 		header( 'Content-Length: ' . filesize( $file ) );
 		readfile( $file ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 		exit;
+	}
+
+	/** Store real live stage & progress updates sent by the worker during an active job. */
+	public static function worker_progress( WP_REST_Request $r ) {
+		$id   = (int) $r['id'];
+		$body = $r->get_json_params();
+		if ( ! Unfold_Workflow::job_matches( $id, (string) ( $body['job_id'] ?? '' ) ) ) {
+			return new WP_Error( 'unfold_job', 'Job not active.', array( 'status' => 409 ) );
+		}
+		$job = get_post_meta( $id, '_unfold_job', true );
+		if ( ! is_array( $job ) ) {
+			$job = array();
+		}
+		$job['progress'] = array(
+			'stage'      => sanitize_key( $body['stage'] ?? '' ),
+			'label'      => sanitize_text_field( $body['label'] ?? '' ),
+			'detail'     => sanitize_text_field( $body['detail'] ?? '' ),
+			'pct'        => max( 0, min( 100, (int) ( $body['pct'] ?? 0 ) ) ),
+			'chars'      => max( 0, (int) ( $body['chars'] ?? 0 ) ),
+			'updated_at' => time(),
+		);
+		update_post_meta( $id, '_unfold_job', $job );
+		return array( 'ok' => true );
 	}
 
 	public static function worker_result( WP_REST_Request $r ) {

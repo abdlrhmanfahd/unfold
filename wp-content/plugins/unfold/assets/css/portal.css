@@ -265,3 +265,11 @@
 .uf-pw-toggle { position: absolute; right: 8px; background: none; border: 0; padding: 6px 8px; font: inherit; font-size: .84rem; font-weight: 600; color: var(--uf-accent-ink); cursor: pointer; border-radius: 6px; }
 .uf-pw-toggle:focus-visible { outline: 2px solid var(--uf-accent); outline-offset: 2px; }
 .uf-ai-msg { font-size: .86rem; color: var(--uf-ink-2); margin: 0 !important; min-height: 1.1em; }
+
+/* Live extraction progress */
+.uf-extract-body { flex: 1; min-width: 0; }
+.uf-extract-prog { margin: var(--uf-s2) 0 var(--uf-s3); }
+.uf-extract-meta { font-size: .86rem; color: var(--uf-ink-2); margin: 6px 0 0 !important; }
+.uf-extract-stages { list-style: none; margin: 0 0 var(--uf-s2); padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .84rem; color: var(--uf-muted); }
+.uf-extract-stages li.is-done { color: var(--uf-ok); font-weight: 600; }
+.uf-extract-stages li.is-active { color: var(--uf-accent-ink); font-weight: 700; }

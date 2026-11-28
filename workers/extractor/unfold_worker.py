@@ -1121,7 +1121,7 @@ class LLMClient:
             return DEFAULT_ANTHROPIC_MODEL
         return "local_rules"
 
-    def _gemini_json(self, system: str, parts: list[dict], max_tokens: int) -> tuple[dict, dict]:
+    def _gemini_json(self, system: str, parts: list[dict], max_tokens: int, on_progress=None) -> tuple[dict, dict]:
         key = self.api_key or os.environ.get("GEMINI_API_KEY") or read_secret_file("gemini-key.txt")
         if not key:
             raise RuntimeError("Missing GEMINI_API_KEY (or gemini-key.txt). Get a free key from Google AI Studio.")
@@ -1136,6 +1136,9 @@ class LLMClient:
         messages = [{"role": "user", "parts": g_parts}]
         usage = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0}
         for attempt in (1, 2):
+            if on_progress:
+                detail = "Sending PDF & files…" if attempt == 1 else "Repairing JSON formatting…"
+                on_progress("ai", f"AI reading with {self.model}…", 45 if attempt == 1 else 75, detail, 0)
             payload = {
                 "system_instruction": {"parts": [{"text": system}]},
                 "contents": messages,
@@ -1151,6 +1154,8 @@ class LLMClient:
                 if r.status_code not in (500, 502, 503, 504) or try_idx == 2:
                     break
                 log.warning("gemini returned HTTP %s, retrying...", r.status_code)
+                if on_progress:
+                    on_progress("ai", f"Waiting for {self.model}…", 50, f"Temporary HTTP {r.status_code}, retrying…", 0)
                 time.sleep(3 * (try_idx + 1))
             if r.status_code in (401, 403):
                 raise RuntimeError("Gemini API key is invalid or unauthorized. Check GEMINI_API_KEY.")
@@ -1176,7 +1181,7 @@ class LLMClient:
                 ]
         raise RuntimeError("unreachable")
 
-    def _ollama_json(self, system: str, parts: list[dict]) -> tuple[dict, dict]:
+    def _ollama_json(self, system: str, parts: list[dict], on_progress=None) -> tuple[dict, dict]:
         base = (self.base_url or os.environ.get("UNFOLD_OLLAMA_URL", DEFAULT_OLLAMA_URL)).rstrip("/")
         thinking = _is_thinking_model(self.model)
         report_cap = 16_000 if thinking else 5_500
@@ -1197,6 +1202,8 @@ class LLMClient:
         num_ctx = int(os.environ.get("UNFOLD_OLLAMA_NUM_CTX", "16384" if thinking else "8192"))
         num_predict = int(os.environ.get("UNFOLD_OLLAMA_NUM_PREDICT", "8192" if thinking else "2048"))
         for attempt in (1, 2):
+            if on_progress:
+                on_progress("ai", f"AI reading with {self.model}…", 42 if attempt == 1 else 78, "Loading model & prompt…" if attempt == 1 else "Repairing JSON…", 0)
             payload = {
                 "model": self.model,
                 "messages": messages,
@@ -1213,8 +1220,10 @@ class LLMClient:
             r.raise_for_status()
             chunks: list[str] = []
             thinking_chars = 0
+            out_chars = 0
             prompt_tokens = 0
             eval_tokens = 0
+            last_report = time.monotonic()
             for raw_line in r.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
@@ -1226,6 +1235,13 @@ class LLMClient:
                 piece = msg.get("content") or ""
                 if piece:
                     chunks.append(piece)
+                    out_chars += len(piece)
+                if on_progress and (thinking_chars + out_chars) > 0 and (time.monotonic() - last_report >= 2.5):
+                    last_report = time.monotonic()
+                    total_ch = thinking_chars + out_chars
+                    phase = "Reasoning step-by-step…" if thinking_chars > 0 and out_chars == 0 else "Writing structured fields…"
+                    pct = min(84, 45 + int(total_ch / 100))
+                    on_progress("ai", f"Extracting with {self.model}…", pct, phase, total_ch)
                 if chunk.get("done"):
                     prompt_tokens = int(chunk.get("prompt_eval_count") or 0)
                     eval_tokens = int(chunk.get("eval_count") or 0)
@@ -1311,14 +1327,18 @@ class LLMClient:
                 messages = messages + [{"role": "assistant", "content": text}, {"role": "user", "content": f"Invalid JSON ({e.msg}). Reply with corrected JSON only."}]
         raise RuntimeError("unreachable")
 
-    def ask_json(self, system: str, parts: list[dict], max_tokens: int = 32768) -> tuple[dict, dict]:
+    def ask_json(self, system: str, parts: list[dict], max_tokens: int = 32768, on_progress=None) -> tuple[dict, dict]:
         if self.provider == "gemini":
-            return self._gemini_json(system, parts, max_tokens)
+            return self._gemini_json(system, parts, max_tokens, on_progress=on_progress)
         if self.provider == "ollama":
-            return self._ollama_json(system, parts)
+            return self._ollama_json(system, parts, on_progress=on_progress)
         if self.provider == "openai_compat":
+            if on_progress:
+                on_progress("ai", f"AI reading with {self.model}…", 45, "Waiting for endpoint response…", 0)
             return self._openai_compat_json(system, parts, max_tokens)
         if self.provider == "anthropic":
+            if on_progress:
+                on_progress("ai", f"AI reading with {self.model}…", 45, "Sending PDF to Claude…", 0)
             return self._anthropic_json(system, parts, max_tokens)
         raise RuntimeError(f"Unsupported provider: {self.provider}")
 
@@ -1720,7 +1740,9 @@ def merge_with_skeleton(ai_data: dict, skeleton: dict, files: list[dict] | None 
     return merged
 
 
-def extract_project(client: LLMClient, zip_bytes: bytes, files: list[dict], report: str | None, schema: dict) -> tuple[dict, dict]:
+def extract_project(client: LLMClient, zip_bytes: bytes, files: list[dict], report: str | None, schema: dict, on_progress=None) -> tuple[dict, dict]:
+    if on_progress:
+        on_progress("scanning", "Scanning archive, CSVs & code (AST)…", 25, f"{len(files)} files in archive", 0)
     if client.provider == "local_rules":
         return local_rules_extract(zip_bytes, files, report)
     skeleton, _ = local_rules_extract(zip_bytes, files, report)
@@ -1734,7 +1756,7 @@ def extract_project(client: LLMClient, zip_bytes: bytes, files: list[dict], repo
             + "exactly; every property shown is required, use null where the report gives nothing:\n"
             + json.dumps(output_schema(schema), separators=(",", ":"))
         )
-    data, meta = client.ask_json(system, parts, max_tokens=65536)
+    data, meta = client.ask_json(system, parts, max_tokens=65536, on_progress=on_progress)
     return enforce_rules(merge_with_skeleton(data, skeleton, files=files)), meta
 
 
@@ -1845,6 +1867,16 @@ class Site:
         r.raise_for_status()
         return r.content
 
+    def progress(self, job: dict, stage: str, label: str, pct: int, detail: str = "", chars: int = 0) -> None:
+        try:
+            self.s.post(
+                self.route(f"/worker/jobs/{job['project_id']}/progress"),
+                json={"job_id": job["job_id"], "stage": stage, "label": label, "pct": int(pct), "detail": detail, "chars": int(chars)},
+                timeout=10,
+            )
+        except requests.RequestException:
+            pass
+
     def result(self, job: dict, payload: dict) -> dict:
         r = self.s.post(self.route(f"/worker/jobs/{job['project_id']}/result"), json={"job_id": job["job_id"], **payload}, timeout=120)
         r.raise_for_status()
@@ -1954,13 +1986,18 @@ def handle(site: Site, client: LLMClient, job: dict) -> None:
             base_url=job_ai.get("base_url") or None,
         )
     log.info("job %s for project %s (provider=%s, model=%s)", job["job_id"], job["project_id"], active_client.provider, active_client.model)
+    def report_progress(stage: str, label: str, pct: int, detail: str = "", chars: int = 0) -> None:
+        site.progress(job, stage, label, pct, detail, chars)
+
     try:
+        report_progress("downloading", "Downloading project ZIP…", 10, f"{len(job.get('files') or [])} files")
         zip_bytes = site.zip(job)
-        data, meta = extract_project(active_client, zip_bytes, job["files"], job.get("report"), job["schema"])
+        data, meta = extract_project(active_client, zip_bytes, job["files"], job.get("report"), job["schema"], on_progress=report_progress)
     except (ValueError, RuntimeError, json.JSONDecodeError, KeyError, zipfile.BadZipFile, requests.RequestException) as e:
         log.exception("extraction failed")
         site.result(job, {"error": str(e)[:400]})
         return
+    report_progress("saving", "Validating schema & attaching files…", 90, f"{meta['usage']['output_tokens']} output tokens")
     res = site.result(job, {"data": data, "meta": meta})
     log.info("done: %s output tokens, %d schema problems, %d files attached",
              meta["usage"]["output_tokens"], len(res.get("schema_errors", [])), res.get("attached", 0))

@@ -4,6 +4,38 @@
  */
 ( function () {
 	'use strict';
+
+	function formatExtractProgress( state, job ) {
+		var stages = [
+			{ id: 'downloading', label: 'Download archive' },
+			{ id: 'scanning', label: 'Scan PDF, CSVs & code' },
+			{ id: 'ai', label: 'AI reads report & files' },
+			{ id: 'saving', label: 'Validate & attach files' },
+		];
+		var prog = ( job && job.progress && typeof job.progress === 'object' ) ? job.progress : null;
+		var stage = prog && prog.stage ? String( prog.stage ) : ( state === 'queued' ? 'queued' : 'downloading' );
+		var activeIdx = stages.findIndex( function ( st ) { return st.id === stage; } );
+		if ( activeIdx === -1 && state === 'extracting' ) activeIdx = 0;
+		var pct = prog && typeof prog.pct === 'number' ? Math.max( 0, Math.min( 100, Math.round( prog.pct ) ) ) : ( state === 'queued' ? 5 : 10 );
+		var title = prog && prog.label ? String( prog.label ) : ( state === 'queued' ? 'Waiting for the AI to start…' : 'Reading your report and files…' );
+		var bits = [];
+		if ( prog && prog.detail ) bits.push( String( prog.detail ) );
+		if ( prog && prog.chars > 0 ) bits.push( prog.chars.toLocaleString() + ' chars received' );
+		return {
+			pct: pct,
+			title: title,
+			detail: bits.join( ' · ' ),
+			milestones: stages.map( function ( st, idx ) {
+				return {
+					id: st.id,
+					label: st.label,
+					status: activeIdx > idx ? 'done' : ( activeIdx === idx ? 'active' : 'pending' ),
+				};
+			} ),
+		};
+	}
+	window.UnfoldPortalHelpers = { formatExtractProgress: formatExtractProgress };
+
 	var C = window.UNFOLD_PORTAL;
 	if ( ! C ) return;
 
@@ -340,11 +372,20 @@
 				ws.innerHTML = html;
 				return;
 			}
-			html += '<div class="uf-state-card uf-state-card--busy"><div class="uf-spinner" aria-hidden="true"></div><div><h2 class="uf-h3">' + ( s === 'queued' ? 'Waiting for the AI to start…' : 'Reading your report and files…' ) + '</h2>'
-				+ '<p>Unfold is breaking the project into parts, collecting equations, parameters and results, and noting where in the report each value comes from. You can leave this page.</p>'
+			var ep = formatExtractProgress( s, P.job );
+			html += '<div class="uf-state-card uf-state-card--busy"><div class="uf-spinner" aria-hidden="true"></div><div class="uf-extract-body">'
+				+ '<h2 class="uf-h3">' + esc( ep.title ) + '</h2>'
+				+ '<div class="uf-progress uf-extract-prog" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + ep.pct + '">'
+				+ '<div class="uf-progress-bar"><span style="width:' + ep.pct + '%"></span></div>'
+				+ '<p class="uf-extract-meta"><strong>' + ep.pct + '%</strong>' + ( ep.detail ? ' · ' + esc( ep.detail ) : '' ) + '</p></div>'
+				+ '<ul class="uf-extract-stages">' + ep.milestones.map( function ( m ) {
+					var icon = m.status === 'done' ? '✓' : ( m.status === 'active' ? '•' : '○' );
+					return '<li class="is-' + m.status + '"><span>' + icon + '</span> ' + esc( m.label ) + '</li>';
+				} ).join( '' ) + '</ul>'
 				+ ( s === 'extracting' && P.job && P.job.claimed_at ? '<p class="uf-muted" data-uf-since="' + ( P.job.claimed_at - ( P.now - Date.now() / 1000 ) ) + '" data-uf-typical="' + ( P.typical_s || 0 ) + '">' + readTiming( P.job.claimed_at - ( P.now - Date.now() / 1000 ), P.typical_s ) + '</p>' : '' )
+				+ '<p class="uf-muted">You can leave this page.</p>'
 				+ filesLine + '</div></div>';
-			pollT = setTimeout( load, 5000 );
+			pollT = setTimeout( load, s === 'extracting' ? 2000 : 5000 );
 		} else if ( s === 'failed' ) {
 			html += '<div class="uf-state-card uf-state-card--alert"><div><h2 class="uf-h3">The AI could not finish reading this project</h2><p class="uf-muted">' + esc( ( P.job && P.job.error ) || 'Unknown error.' ) + '</p>' + filesLine
 				+ '<div class="uf-ai-box" data-uf-ai></div>'

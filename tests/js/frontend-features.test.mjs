@@ -116,3 +116,31 @@ test( 'Recorded data CSV plotter handles categorical x, unordered scatter x, quo
 	const tsSpec = csv.buildPlotSpec( tsCsv, [ 't', 'v' ], { t: 's', v: 'm/s' } );
 	assert.equal( tsSpec.traces[ 0 ].mode, 'lines' );
 } );
+
+test( 'Portal live extraction progress helper reflects real backend stages and streamed chars', () => {
+	const win = loadBrowserScript( 'wp-content/plugins/unfold/assets/js/portal.js' );
+	const api = win.UnfoldPortalHelpers;
+	assert.ok( api, 'UnfoldPortalHelpers should be registered' );
+
+	const queued = api.formatExtractProgress( 'queued', null );
+	assert.equal( queued.pct, 5 );
+	assert.equal( queued.milestones[ 0 ].status, 'pending' );
+
+	const aiProg = api.formatExtractProgress( 'extracting', {
+		progress: {
+			stage: 'ai',
+			label: 'Extracting with qwen3:14b…',
+			detail: 'Writing structured fields…',
+			pct: 64,
+			chars: 1900,
+		},
+	} );
+	assert.equal( aiProg.pct, 64 );
+	assert.equal( aiProg.title, 'Extracting with qwen3:14b…' );
+	assert.match( aiProg.detail, /Writing structured fields/ );
+	assert.match( aiProg.detail, /chars received/ );
+	assert.deepEqual(
+		Array.from( aiProg.milestones, m => m.status ),
+		[ 'done', 'done', 'active', 'pending' ]
+	);
+} );
