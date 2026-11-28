@@ -83,7 +83,8 @@ if ( ! function_exists( 'get_post_meta' ) ) {
 
 if ( ! function_exists( 'update_post_meta' ) ) {
 	function update_post_meta( $post_id, $meta_key, $meta_value ) {
-		$GLOBALS['unfold_test_post_meta'][ (int) $post_id ][ $meta_key ] = $meta_value;
+		// Mirror WordPress core: update_post_meta unslashes incoming values before persistence.
+		$GLOBALS['unfold_test_post_meta'][ (int) $post_id ][ $meta_key ] = wp_unslash( $meta_value );
 		return true;
 	}
 }
@@ -145,6 +146,18 @@ if ( ! function_exists( 'wp_slash' ) ) {
 		}
 		if ( is_string( $value ) ) {
 			return addslashes( $value );
+		}
+		return $value;
+	}
+}
+
+if ( ! function_exists( 'wp_unslash' ) ) {
+	function wp_unslash( $value ) {
+		if ( is_array( $value ) ) {
+			return array_map( 'wp_unslash', $value );
+		}
+		if ( is_string( $value ) ) {
+			return stripslashes( $value );
 		}
 		return $value;
 	}
