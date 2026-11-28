@@ -40,6 +40,7 @@ foreach ( array( __DIR__ . '/fixtures/valid-project.json', UNFOLD_DIR . 'sample/
 
 do_shortcode( '[unfold_featured]' );
 do_shortcode( '[unfold_facts]' );
+do_shortcode( '[unfold_gallery]' );
 
 // Full project lifecycle integration test (cleaned up in finally).
 require_once ABSPATH . 'wp-admin/includes/user.php';

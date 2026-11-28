@@ -115,6 +115,11 @@ test( 'Recorded data CSV plotter handles categorical x, unordered scatter x, quo
 	const tsCsv = 't,v\n0.0,0.2\n0.1,0.5\n0.2,0.6\n';
 	const tsSpec = csv.buildPlotSpec( tsCsv, [ 't', 'v' ], { t: 's', v: 'm/s' } );
 	assert.equal( tsSpec.traces[ 0 ].mode, 'lines' );
+
+	// 4. Narrow plots stack legend entries at full width to avoid overlap on mobile.
+	const mobSpec = csv.buildPlotSpec( catCsv, [ 'block_id', 'block_loss', 'cmin_m' ], { block_loss: 'loss units', cmin_m: 'm' }, 340 );
+	assert.equal( mobSpec.layout.legend.entrywidth, 0.98 );
+	assert.ok( mobSpec.layout.margin.t >= 70 );
 } );
 
 test( 'Portal live extraction progress helper reflects real backend stages and streamed chars', () => {
@@ -279,4 +284,57 @@ test( 'Instructor decision form validates empty return note and posts approve de
 	await new Promise( r => setTimeout( r, 10 ) );
 	assert.equal( fetchCalls[ 2 ].url, 'http://localhost:8881/rest/team/role' );
 	assert.deepEqual( JSON.parse( fetchCalls[ 2 ].opts.body ), { user_id: 15, role: 'unfold_instructor' } );
+} );
+
+test( 'Gallery search, topic filter, and sort order update card visibility cleanly', () => {
+	const makeCard = ( idx, title, date, keywords, search ) => ( {
+		hidden: false,
+		attrs: {
+			'data-order': String( idx ),
+			'data-title': title.toLowerCase(),
+			'data-date': String( date ),
+			'data-keywords': JSON.stringify( keywords ),
+			'data-search': search.toLowerCase(),
+		},
+		getAttribute( k ) { return this.attrs[ k ] || ''; },
+	} );
+	const cards = [
+		makeCard( 0, 'Zeta Controller', 100, [ 'PID' ], 'zeta controller pid' ),
+		makeCard( 1, 'Alpha LiDAR', 300, [ 'LiDAR' ], 'alpha lidar obstacle' ),
+	];
+	const appended = [];
+	const list = { appendChild: c => appended.push( c ) };
+	const kw = { value: '', addEventListener( ev, fn ) { this[ 'on_' + ev ] = fn; } };
+	const search = { value: '', addEventListener( ev, fn ) { this[ 'on_' + ev ] = fn; } };
+	const sort = { value: 'featured', addEventListener( ev, fn ) { this[ 'on_' + ev ] = fn; } };
+	const count = { textContent: '' };
+	const none = { hidden: true };
+	const gallery = {
+		querySelector( sel ) {
+			if ( sel === '.uf-cards' ) return list;
+			if ( sel === '[data-uf-filter="keyword"]' ) return kw;
+			if ( sel === '[data-uf-search]' ) return search;
+			if ( sel === '[data-uf-sort]' ) return sort;
+			if ( sel === '[data-uf-count]' ) return count;
+			if ( sel === '[data-uf-none]' ) return none;
+			return null;
+		},
+		querySelectorAll: () => cards,
+		addEventListener() {},
+	};
+	const code = fs.readFileSync( new URL( '../../wp-content/plugins/unfold/assets/js/gallery.js', import.meta.url ), 'utf8' );
+	vm.runInNewContext( code, { window: {}, document: { querySelectorAll: () => [ gallery ] } } );
+
+	search.value = 'lidar';
+	search.on_input();
+	assert.equal( cards[ 0 ].hidden, true );
+	assert.equal( cards[ 1 ].hidden, false );
+	assert.equal( count.textContent, '1 project' );
+
+	appended.length = 0;
+	search.value = '';
+	sort.value = 'az';
+	sort.on_change();
+	assert.equal( appended[ 0 ].attrs[ 'data-title' ], 'alpha lidar' );
+	assert.equal( count.textContent, '2 projects' );
 } );

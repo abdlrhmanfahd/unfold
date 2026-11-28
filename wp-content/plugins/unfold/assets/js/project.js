@@ -46,7 +46,7 @@
 		return pairs === 0 || inc / pairs >= 0.9;
 	}
 
-	function buildPlotSpec( txt, declared, units ) {
+	function buildPlotSpec( txt, declared, units, widthPx ) {
 		var d = parseCSV( txt );
 		var uMap = units || {};
 		var dec = Array.isArray( declared ) ? declared : [];
@@ -84,8 +84,11 @@
 			if ( traceOpts.marker ) tr.marker = traceOpts.marker;
 			return tr;
 		} );
+		var maxLegendChars = traces.reduce( function ( m, t ) { return Math.max( m, String( t.name || '' ).length ); }, 0 );
+		var narrow = ( widthPx && widthPx < 520 ) || maxLegendChars > 28;
+		var topMargin = traces.length <= 1 ? 20 : ( narrow ? ( 28 + traces.length * 22 ) : ( traces.length > 2 ? 78 : 58 ) );
 		var layout = {
-			margin: { l: 56, r: 16, t: traces.length > 1 ? 52 : 18, b: 54 },
+			margin: { l: 58, r: 18, t: topMargin, b: 56 },
 			showlegend: traces.length > 1,
 			xaxis: { title: { text: lab( d.head[ xi ] ), standoff: 10 }, automargin: true },
 			yaxis: traces.length === 1
@@ -93,8 +96,8 @@
 					? { title: { text: traces[ 0 ].name }, scaleanchor: 'x', scaleratio: 1, automargin: true }
 					: { title: { text: traces[ 0 ].name }, automargin: true } )
 				: { automargin: true },
-			legend: { orientation: 'h', x: 0, y: 1.02, yanchor: 'bottom' },
-			font: { family: 'inherit' },
+			legend: { orientation: 'h', x: 0, y: 1.04, yanchor: 'bottom', xanchor: 'left', entrywidth: narrow ? 0.98 : 0.48, entrywidthmode: 'fraction', font: { size: narrow ? 10.5 : 11 } },
+			font: { family: 'Onest, system-ui, -apple-system, sans-serif', size: 12 },
 			paper_bgcolor: 'rgba(0,0,0,0)',
 			plot_bgcolor: 'rgba(0,0,0,0)',
 		};
@@ -144,23 +147,48 @@
 		} );
 	}
 
-	// Highlight the section in view in the sticky nav.
+	// Highlight the active section cleanly from scroll position (no observer lag on tall sections).
 	var tocLinks = Array.prototype.slice.call( root.querySelectorAll( '.uf-toc a' ) );
-	if ( 'IntersectionObserver' in window && tocLinks.length ) {
-		var seen = {};
-		var io = new IntersectionObserver( function ( entries ) {
-			entries.forEach( function ( en ) { seen[ en.target.id ] = en.isIntersecting; } );
-			var firstVisible = null;
+	if ( tocLinks.length ) {
+		var tocBar = root.querySelector( '.uf-toc' );
+		var tocList = tocBar ? tocBar.querySelector( 'ul' ) : null;
+		var lastActive = null;
+		var tocSections = tocLinks.map( function ( a ) {
+			return { a: a, el: document.getElementById( a.getAttribute( 'href' ).slice( 1 ) ) };
+		} ).filter( function ( it ) { return !! it.el; } );
+		var spyTick = false;
+		function updateSpy() {
+			spyTick = false;
+			if ( ! tocSections.length ) return;
+			var offset = ( tocBar ? tocBar.offsetHeight : 48 ) + 40;
+			var active = tocSections[ 0 ].el.id;
+			var atBottom = ( window.innerHeight + window.scrollY ) >= ( document.documentElement.scrollHeight - 40 );
+			if ( atBottom ) {
+				active = tocSections[ tocSections.length - 1 ].el.id;
+			} else {
+				tocSections.forEach( function ( it ) {
+					if ( it.el.getBoundingClientRect().top <= offset ) active = it.el.id;
+				} );
+			}
 			tocLinks.forEach( function ( a ) {
-				var id = a.getAttribute( 'href' ).slice( 1 );
-				if ( ! firstVisible && seen[ id ] ) firstVisible = id;
+				var on = a.getAttribute( 'href' ).slice( 1 ) === active;
+				a.classList.toggle( 'is-active', on );
+				if ( on && active !== lastActive && tocList && tocList.scrollWidth > tocList.clientWidth ) {
+					tocList.scrollTo( { left: Math.max( 0, a.offsetLeft - 16 ), behavior: 'smooth' } );
+				}
 			} );
-			tocLinks.forEach( function ( a ) { a.classList.toggle( 'is-active', a.getAttribute( 'href' ).slice( 1 ) === firstVisible ); } );
-		}, { rootMargin: '-80px 0px -55% 0px' } );
+			lastActive = active;
+		}
+		window.addEventListener( 'scroll', function () {
+			if ( ! spyTick ) { spyTick = true; requestAnimationFrame( updateSpy ); }
+		}, { passive: true } );
 		tocLinks.forEach( function ( a ) {
-			var s = document.getElementById( a.getAttribute( 'href' ).slice( 1 ) );
-			if ( s ) io.observe( s );
+			a.addEventListener( 'click', function () {
+				var target = a.getAttribute( 'href' ).slice( 1 );
+				tocLinks.forEach( function ( l ) { l.classList.toggle( 'is-active', l.getAttribute( 'href' ).slice( 1 ) === target ); } );
+			} );
 		} );
+		updateSpy();
 	}
 
 	tabs.forEach( function ( t, i ) {
@@ -390,7 +418,7 @@
 		fetch( el.getAttribute( 'data-uf-csv' ), { credentials: 'same-origin' } )
 			.then( function ( r ) { if ( ! r.ok ) throw new Error( r.status ); return r.text(); } )
 			.then( function ( txt ) {
-				var spec = buildPlotSpec( txt, declared, units );
+				var spec = buildPlotSpec( txt, declared, units, el.clientWidth || window.innerWidth );
 				el.innerHTML = '';
 				window.Plotly.newPlot( el, spec.traces, spec.layout, { responsive: true, displaylogo: false } );
 			} )

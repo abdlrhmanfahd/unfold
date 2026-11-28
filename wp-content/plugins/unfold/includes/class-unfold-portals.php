@@ -480,6 +480,9 @@ class Unfold_Portals {
 
 	public static function account_link() {
 		if ( ! is_user_logged_in() ) {
+			if ( self::is_page( 'login' ) ) {
+				return '';
+			}
 			return '<a class="uf-account" href="' . esc_url( self::url( 'login' ) ) . '">' . esc_html__( 'Sign in', 'unfold' ) . '</a>';
 		}
 		$u     = wp_get_current_user();

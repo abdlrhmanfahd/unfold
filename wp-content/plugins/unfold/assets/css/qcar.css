@@ -45,13 +45,14 @@
 
 /* Home hero halo: newest projects and 3D worlds circling the car (qcar-hero.js); gone while unfolded. */
 .uf-halo{position:absolute;inset:0;pointer-events:none;z-index:1;transition:none}
-.uf-halo-pill{position:absolute;left:0;top:0;display:flex;align-items:center;gap:.45rem;white-space:nowrap;max-width:15rem;overflow:hidden;text-overflow:ellipsis;
-  font:500 13px/1.35 Onest,system-ui,sans-serif;color:var(--ufq-ink);text-decoration:none;pointer-events:auto;
-  background:rgba(255,255,255,.9);border:1px solid var(--ufq-line2);border-radius:99px;padding:.32rem .8rem .32rem .6rem;
-  box-shadow:0 1px 2px rgba(15,23,32,.06),0 6px 18px rgba(15,23,32,.06);backdrop-filter:blur(6px);
+.uf-halo-pill{position:absolute;left:0;top:0;display:inline-flex;align-items:center;gap:.45rem;max-width:14.5rem;
+  font:500 12.5px/1.35 Onest,system-ui,sans-serif;color:var(--ufq-ink);text-decoration:none;pointer-events:auto;
+  background:rgba(255,255,255,.94);border:1px solid var(--ufq-line2);border-radius:99px;padding:.34rem .8rem .34rem .6rem;
+  box-shadow:0 2px 6px rgba(15,23,32,.06),0 8px 20px rgba(15,23,32,.07);backdrop-filter:blur(8px);
   transition:opacity .25s,border-color .15s,box-shadow .15s}
+.uf-halo-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .uf-halo-pill::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:var(--ufq-signal)}
 .uf-halo-pill--world::before{background:#7F77DD}
-.uf-halo-pill:hover,.uf-halo-pill:focus-visible{opacity:1!important;border-color:var(--ufq-signal);box-shadow:0 0 0 3px var(--ufq-soft),0 8px 22px rgba(15,23,32,.1);outline:none}
-.uf-halo-pill--world:hover,.uf-halo-pill--world:focus-visible{border-color:#7F77DD;box-shadow:0 0 0 3px #EEEDFE,0 8px 22px rgba(15,23,32,.1)}
-@media (max-width:700px){.uf-halo-pill{font-size:12px;max-width:10rem;padding:.25rem .65rem .25rem .5rem}}
+.uf-halo-pill:hover,.uf-halo-pill:focus-visible{opacity:1!important;border-color:var(--ufq-signal);box-shadow:0 0 0 3px var(--ufq-soft),0 8px 22px rgba(15,23,32,.12);outline:none}
+.uf-halo-pill--world:hover,.uf-halo-pill--world:focus-visible{border-color:#7F77DD;box-shadow:0 0 0 3px #EEEDFE,0 8px 22px rgba(15,23,32,.12)}
+@media (max-width:700px){.uf-halo-pill{font-size:12px;max-width:10.5rem;padding:.25rem .65rem .25rem .5rem}}
