@@ -6,6 +6,68 @@
 ( function () {
 	'use strict';
 	const esc = s => String( s ?? '' ).replace( /[&<>"]/g, c => ( { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } )[ c ] );
+	const AI_PROVIDERS = [
+		{ id: 'claude', label: 'Claude', url: 'https://claude.ai/new?q=' },
+		{ id: 'chatgpt', label: 'ChatGPT', url: 'https://chatgpt.com/?q=' },
+		{ id: 'perplexity', label: 'Perplexity', url: 'https://www.perplexity.ai/search/new?q=' },
+		{ id: 'grok', label: 'Grok', url: 'https://grok.com/?q=' },
+		{ id: 'copilot', label: 'Copilot', url: 'https://copilot.microsoft.com/?q=' },
+	];
+	const paperLink = w => w.doi || ( w.primary_location && w.primary_location.landing_page_url ) || w.id;
+	function normalizeCrossref( items ) {
+		return ( items || [] ).map( it => {
+			const title = Array.isArray( it.title ) ? ( it.title[ 0 ] || '' ) : ( it.title || '' );
+			const dp = it.published && Array.isArray( it.published[ 'date-parts' ] ) ? it.published[ 'date-parts' ][ 0 ] : null;
+			const year = Array.isArray( dp ) ? ( dp[ 0 ] || null ) : null;
+			const doiUrl = it.DOI ? ( 'https://doi.org/' + it.DOI ) : '';
+			const landing = it.URL || doiUrl || '';
+			const venueName = Array.isArray( it[ 'container-title' ] ) ? ( it[ 'container-title' ][ 0 ] || '' ) : '';
+			const pdfLink = Array.isArray( it.link ) ? it.link.find( l => /pdf/i.test( l[ 'content-type' ] || '' ) ) : null;
+			return {
+				id: doiUrl || landing || title,
+				doi: doiUrl,
+				display_name: title,
+				publication_year: year,
+				cited_by_count: it[ 'is-referenced-by-count' ] || 0,
+				primary_location: { source: { display_name: venueName }, landing_page_url: landing },
+				open_access: { oa_url: pdfLink && pdfLink.URL ? pdfLink.URL : '' },
+			};
+		} ).filter( w => w.display_name );
+	}
+	function buildResearchPrompt( summary, papers, checkedSet, linkFn ) {
+		const getLink = linkFn || paperLink;
+		const picked = [];
+		for ( let i = 0; i < ( papers || [] ).length; i++ ) {
+			if ( ! checkedSet || checkedSet.has( i ) ) picked.push( papers[ i ] );
+		}
+		const paperBlock = picked.length
+			? '\n\nRelated papers:\n' + picked.map( ( w, i ) => ( i + 1 ) + '. ' + w.display_name + ' (' + ( w.publication_year || 'n.d.' ) + ') ' + getLink( w ) ).join( '\n' )
+			: '';
+		return 'I am an instructor. One of my students did the engineering project below, and I want to develop the idea further: '
+			+ 'what is new or missing compared with the published work, which papers I should read first and why, and two or three '
+			+ 'stronger follow-up projects or research questions with the experiment for each.\n\n'
+			+ summary + paperBlock;
+	}
+	function fetchPapers( q, fetchFn ) {
+		const runFetch = fetchFn || ( ( url ) => fetch( url ) );
+		const oaUrl = 'https://api.openalex.org/works?per-page=10&search=' + encodeURIComponent( q ) + '&select=id,doi,display_name,publication_year,cited_by_count,primary_location,open_access';
+		const crUrl = 'https://api.crossref.org/works?rows=10&query=' + encodeURIComponent( q );
+		return runFetch( oaUrl )
+			.then( r => {
+				if ( ! r.ok ) { const e = new Error( 'http' ); e.status = r.status; throw e; }
+				return r.json();
+			} )
+			.then( j => ( { papers: j.results || [], source: 'openalex' } ) )
+			.catch( oaErr => runFetch( crUrl )
+				.then( r2 => {
+					if ( ! r2.ok ) throw oaErr;
+					return r2.json();
+				} )
+				.then( j2 => ( { papers: normalizeCrossref( ( j2.message && j2.message.items ) || [] ), source: 'crossref' } ) )
+				.catch( () => { throw oaErr; } )
+			);
+	}
+	window.UnfoldResearch = { AI_PROVIDERS, normalizeCrossref, buildResearchPrompt, fetchPapers };
 
 	document.querySelectorAll( '[data-unfold-p2]' ).forEach( root => {
 		const P = JSON.parse( root.querySelector( 'script[type="application/json"]' ).textContent );
@@ -38,17 +100,9 @@
 		 * per-paper selection, AI chat redirect (Claude/ChatGPT/Perplexity/Grok/Copilot), and Copy prompt.
 		 */
 		function research( btn, box ) {
-			const AI_PROVIDERS = [
-				{ id: 'claude', label: 'Claude', url: 'https://claude.ai/new?q=' },
-				{ id: 'chatgpt', label: 'ChatGPT', url: 'https://chatgpt.com/?q=' },
-				{ id: 'perplexity', label: 'Perplexity', url: 'https://www.perplexity.ai/search/new?q=' },
-				{ id: 'grok', label: 'Grok', url: 'https://grok.com/?q=' },
-				{ id: 'copilot', label: 'Copilot', url: 'https://copilot.microsoft.com/?q=' },
-			];
 			let papers = [], loaded = false, providerId = 'claude';
 			const checked = new Set();
 			const venue = w => ( w.primary_location && w.primary_location.source && w.primary_location.source.display_name ) || '';
-			const link = w => w.doi || ( w.primary_location && w.primary_location.landing_page_url ) || w.id;
 			const safeUrl = u => ( typeof u === 'string' && /^https?:\/\//i.test( u.trim() ) ) ? u.trim() : '#';
 			const currentProvider = () => AI_PROVIDERS.find( p => p.id === providerId ) || AI_PROVIDERS[ 0 ];
 			const hintText = cur => `Opens ${ cur.label } with this project and ${ checked.size } selected ${ checked.size === 1 ? 'paper' : 'papers' }, or copy the prompt for any other AI.`;
@@ -79,7 +133,7 @@
 				const cur = currentProvider();
 				box.innerHTML = `<form class="ufp-res-q"><input type="search" value="${ esc( q ) }" aria-label="Search topic"><button type="submit">Search</button></form>`
 					+ ( note ? `<p class="ufp-res-note">${ esc( note ) }</p>` : '' )
-					+ ( papers.length ? '<ol class="ufp-res-list">' + papers.map( ( w, i ) => `<li><label class="ufp-res-item"><input type="checkbox" data-paper-idx="${ i }"${ checked.has( i ) ? ' checked' : '' }><div class="ufp-res-body"><a href="${ esc( safeUrl( link( w ) ) ) }" target="_blank" rel="noopener">${ esc( w.display_name || '' ) }</a>`
+					+ ( papers.length ? '<ol class="ufp-res-list">' + papers.map( ( w, i ) => `<li><label class="ufp-res-item"><input type="checkbox" data-paper-idx="${ i }"${ checked.has( i ) ? ' checked' : '' }><div class="ufp-res-body"><a href="${ esc( safeUrl( paperLink( w ) ) ) }" target="_blank" rel="noopener">${ esc( w.display_name || '' ) }</a>`
 						+ `<span>${ [ w.publication_year, venue( w ), ( w.cited_by_count || 0 ) + ' citations' ].filter( Boolean ).map( esc ).join( ' · ' ) }`
 						+ ( w.open_access && w.open_access.oa_url && safeUrl( w.open_access.oa_url ) !== '#' ? ` · <a href="${ esc( safeUrl( w.open_access.oa_url ) ) }" target="_blank" rel="noopener">Free PDF</a>` : '' ) + '</span></div></label></li>' ).join( '' ) + '</ol>' : '' )
 					+ ( papers.length ? `<div class="ufp-res-go"><select class="ufp-ai-pick" aria-label="AI provider">${ AI_PROVIDERS.map( p => `<option value="${ esc( p.id ) }"${ p.id === providerId ? ' selected' : '' }>${ esc( p.label ) }</option>` ).join( '' ) }</select>`
@@ -120,13 +174,14 @@
 			function search( q, retried ) {
 				if ( ! q ) return;
 				draw( q, 'Searching…' );
-				fetch( 'https://api.openalex.org/works?per-page=10&search=' + encodeURIComponent( q ) + '&select=id,doi,display_name,publication_year,cited_by_count,primary_location,open_access' )
-					.then( r => { if ( ! r.ok ) { const e = new Error( 'http' ); e.status = r.status; throw e; } return r.json(); } )
-					.then( j => {
-						papers = j.results || [];
+				fetchPapers( q, window.fetch )
+					.then( res => {
+						papers = res.papers || [];
 						checked.clear();
 						for ( let i = 0; i < papers.length; i++ ) checked.add( i );
-						draw( q, papers.length ? '' : 'Nothing found. Try other words.' );
+						const note = ! papers.length ? 'Nothing found. Try other words.'
+							: ( res.source === 'crossref' ? 'Loaded via Crossref while OpenAlex is temporarily busy.' : '' );
+						draw( q, note );
 					} )
 					.catch( e => {
 						// a dropped connection or a busy moment usually clears in a second or two: try once more by itself
@@ -137,17 +192,7 @@
 					} );
 			}
 			function prompt() {
-				const picked = [];
-				for ( let i = 0; i < papers.length; i++ ) {
-					if ( checked.has( i ) ) picked.push( papers[ i ] );
-				}
-				const paperBlock = picked.length
-					? '\n\nRelated papers:\n' + picked.map( ( w, i ) => ( i + 1 ) + '. ' + w.display_name + ' (' + ( w.publication_year || 'n.d.' ) + ') ' + link( w ) ).join( '\n' )
-					: '';
-				return 'I am an instructor. One of my students did the engineering project below, and I want to develop the idea further: '
-					+ 'what is new or missing compared with the published work, which papers I should read first and why, and two or three '
-					+ 'stronger follow-up projects or research questions with the experiment for each.\n\n'
-					+ P.research.summary + paperBlock;
+				return buildResearchPrompt( P.research.summary, papers, checked, paperLink );
 			}
 			btn.addEventListener( 'click', () => {
 				const open = box.hidden;
