@@ -10,6 +10,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 if ( ! defined( 'UNFOLD_DIR' ) ) {
 	define( 'UNFOLD_DIR', dirname( __DIR__, 2 ) . '/wp-content/plugins/unfold/' );
 }
+if ( ! defined( 'UNFOLD_META_JSON' ) ) {
+	define( 'UNFOLD_META_JSON', '_unfold_project_json' );
+}
+if ( ! defined( 'UNFOLD_META_RAW' ) ) {
+	define( 'UNFOLD_META_RAW', '_unfold_project_raw' );
+}
+if ( ! defined( 'UNFOLD_META_ERRORS' ) ) {
+	define( 'UNFOLD_META_ERRORS', '_unfold_project_errors' );
+}
 
 if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
 	define( 'MINUTE_IN_SECONDS', 60 );
@@ -74,7 +83,15 @@ if ( ! function_exists( 'get_post_meta' ) ) {
 
 if ( ! function_exists( 'update_post_meta' ) ) {
 	function update_post_meta( $post_id, $meta_key, $meta_value ) {
-		$GLOBALS['unfold_test_post_meta'][ (int) $post_id ][ $meta_key ] = $meta_value;
+		// Mirror WordPress core: update_post_meta unslashes incoming values before persistence.
+		$GLOBALS['unfold_test_post_meta'][ (int) $post_id ][ $meta_key ] = wp_unslash( $meta_value );
+		return true;
+	}
+}
+
+if ( ! function_exists( 'delete_post_meta' ) ) {
+	function delete_post_meta( $post_id, $meta_key ) {
+		unset( $GLOBALS['unfold_test_post_meta'][ (int) $post_id ][ $meta_key ] );
 		return true;
 	}
 }
@@ -134,6 +151,18 @@ if ( ! function_exists( 'wp_slash' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_unslash' ) ) {
+	function wp_unslash( $value ) {
+		if ( is_array( $value ) ) {
+			return array_map( 'wp_unslash', $value );
+		}
+		if ( is_string( $value ) ) {
+			return stripslashes( $value );
+		}
+		return $value;
+	}
+}
+
 if ( ! function_exists( 'wp_list_pluck' ) ) {
 	function wp_list_pluck( $input_list, $field, $index_key = null ) {
 		$output = array();
@@ -151,6 +180,7 @@ if ( ! function_exists( 'wp_list_pluck' ) ) {
 }
 
 require_once UNFOLD_DIR . 'includes/class-unfold-validator.php';
+require_once UNFOLD_DIR . 'includes/class-unfold-store.php';
 require_once UNFOLD_DIR . 'includes/class-unfold-simdata.php';
 require_once UNFOLD_DIR . 'includes/class-unfold-accounts.php';
 require_once UNFOLD_DIR . 'includes/class-unfold-ai.php';

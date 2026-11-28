@@ -7,6 +7,7 @@ import zipfile
 from unittest import mock
 
 sys.path.insert(0, os.path.abspath("workers/world"))
+import map_session as ms  # noqa: E402
 import world_worker as ww  # noqa: E402
 
 
@@ -56,6 +57,27 @@ class WorldWorkerTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
             if not existed and os.path.exists(tok_path):
                 os.unlink(tok_path)
+
+    def test_map_session_se3_and_voxel_helpers(self):
+        import numpy as np
+        v = np.array([0.2, -0.3, 0.4])
+        S = ms.skew(v)
+        self.assertTrue(np.allclose(S, -S.T))
+        R = ms.so3_exp(v)
+        self.assertTrue(np.allclose(R @ R.T, np.eye(3), atol=1e-6))
+        v_back = ms.so3_log(R)
+        self.assertTrue(np.allclose(v, v_back, atol=1e-6))
+        q = ms.quat(R)
+        self.assertAlmostEqual(sum(c * c for c in q), 1.0, places=6)
+
+        pts = np.array([[0.01, 0.01, 0.01], [0.02, 0.02, 0.02], [1.0, 1.0, 1.0]])
+        reduced = ms.voxel(pts, 0.1)
+        self.assertEqual(len(reduced), 2)
+
+    def test_handle_requires_existing_zip_path(self):
+        fake_site = mock.Mock()
+        with self.assertRaises(RuntimeError):
+            ww.handle(fake_site, {"drive_id": 1, "job_id": "j1", "name": "demo", "zip_path": "/no/such/file.zip", "out_dir": "/tmp/out"})
 
 
 if __name__ == "__main__":
