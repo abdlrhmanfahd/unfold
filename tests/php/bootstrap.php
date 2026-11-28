@@ -10,6 +10,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 if ( ! defined( 'UNFOLD_DIR' ) ) {
 	define( 'UNFOLD_DIR', dirname( __DIR__, 2 ) . '/wp-content/plugins/unfold/' );
 }
+if ( ! defined( 'UNFOLD_META_JSON' ) ) {
+	define( 'UNFOLD_META_JSON', '_unfold_project_json' );
+}
+if ( ! defined( 'UNFOLD_META_RAW' ) ) {
+	define( 'UNFOLD_META_RAW', '_unfold_project_raw' );
+}
+if ( ! defined( 'UNFOLD_META_ERRORS' ) ) {
+	define( 'UNFOLD_META_ERRORS', '_unfold_project_errors' );
+}
 
 if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
 	define( 'MINUTE_IN_SECONDS', 60 );
@@ -75,6 +84,13 @@ if ( ! function_exists( 'get_post_meta' ) ) {
 if ( ! function_exists( 'update_post_meta' ) ) {
 	function update_post_meta( $post_id, $meta_key, $meta_value ) {
 		$GLOBALS['unfold_test_post_meta'][ (int) $post_id ][ $meta_key ] = $meta_value;
+		return true;
+	}
+}
+
+if ( ! function_exists( 'delete_post_meta' ) ) {
+	function delete_post_meta( $post_id, $meta_key ) {
+		unset( $GLOBALS['unfold_test_post_meta'][ (int) $post_id ][ $meta_key ] );
 		return true;
 	}
 }
@@ -151,6 +167,7 @@ if ( ! function_exists( 'wp_list_pluck' ) ) {
 }
 
 require_once UNFOLD_DIR . 'includes/class-unfold-validator.php';
+require_once UNFOLD_DIR . 'includes/class-unfold-store.php';
 require_once UNFOLD_DIR . 'includes/class-unfold-simdata.php';
 require_once UNFOLD_DIR . 'includes/class-unfold-accounts.php';
 require_once UNFOLD_DIR . 'includes/class-unfold-ai.php';

@@ -143,4 +143,100 @@ test( 'Portal live extraction progress helper reflects real backend stages and s
 		Array.from( aiProg.milestones, m => m.status ),
 		[ 'done', 'done', 'active', 'pending' ]
 	);
+
+	const savingProg = api.formatExtractProgress( 'extracting', {
+		progress: { stage: 'saving', label: 'Saving…', pct: 95 },
+	} );
+	assert.deepEqual(
+		Array.from( savingProg.milestones, m => m.status ),
+		[ 'done', 'done', 'done', 'active' ]
+	);
+} );
+
+test( 'Simulation templates validate path_follow and speed_loop physics checks', () => {
+	const code = fs.readFileSync( new URL( '../../wp-content/plugins/unfold/assets/js/templates.js', import.meta.url ), 'utf8' );
+	const sandbox = { window: {}, document: { querySelectorAll: () => [] }, ResizeObserver: class { observe() {} disconnect() {} } };
+	vm.runInNewContext( code, sandbox );
+	const T = sandbox.window.UnfoldTemplates;
+	assert.ok( T.has( 'path_follow' ) );
+	assert.ok( T.has( 'speed_loop' ) );
+	assert.equal( T.has( 'unknown_template' ), false );
+
+	const noRoute = T.check( 'path_follow', { inputs: {}, streams: [] } );
+	assert.equal( noRoute.ok, false );
+
+	const straight = T.check( 'path_follow', {
+		inputs: { duration: 1, v_ref: 0.5, k: 1, b: 0, bhat: 0 },
+		streams: [
+			{ role: 'route', cols: { x: [ 0, 2 ], y: [ 0, 0 ] } },
+			{ role: 'run', label: 'Straight', cols: { t: [ 0, 0.5, 1 ], e: [ 0, 0, 0 ] }, set: [] },
+		],
+	} );
+	assert.equal( straight.ok, true );
+
+	const noSpeed = T.check( 'speed_loop', { inputs: { v_ref: 0.5 }, streams: [] } );
+	assert.equal( noSpeed.ok, false );
+} );
+
+test( 'Auth script toggles password visibility and ARIA state cleanly', () => {
+	const listeners = [];
+	const input = { type: 'password' };
+	const attrs = {};
+	const btn = {
+		textContent: 'Show',
+		closest: () => ( { querySelector: () => input } ),
+		addEventListener: ( ev, fn ) => listeners.push( { ev, fn } ),
+		setAttribute: ( k, v ) => { attrs[ k ] = v; },
+	};
+	const code = fs.readFileSync( new URL( '../../wp-content/plugins/unfold/assets/js/auth.js', import.meta.url ), 'utf8' );
+	vm.runInNewContext( code, { window: {}, document: { querySelectorAll: () => [ btn ] } } );
+	assert.equal( listeners.length, 1 );
+	listeners[ 0 ].fn();
+	assert.equal( input.type, 'text' );
+	assert.equal( btn.textContent, 'Hide' );
+	assert.equal( attrs[ 'aria-pressed' ], 'true' );
+	listeners[ 0 ].fn();
+	assert.equal( input.type, 'password' );
+	assert.equal( btn.textContent, 'Show' );
+	assert.equal( attrs[ 'aria-pressed' ], 'false' );
+} );
+
+test( 'Instructor decision form validates empty return note and posts approve decision', async () => {
+	const msgEl = { textContent: '' };
+	const noteInput = { value: '   ', focused: false, focus() { this.focused = true; } };
+	const buttons = [ { value: 'approve', disabled: false, addEventListener() {} }, { value: 'changes', disabled: false, addEventListener() {} } ];
+	let submitHandler = null;
+	const formEl = {
+		note: noteInput,
+		getAttribute: () => '77',
+		querySelector: sel => ( sel === '.uf-decision-msg' ? msgEl : null ),
+		querySelectorAll: sel => ( sel.includes( 'decision' ) ? buttons : buttons ),
+		addEventListener: ( ev, fn ) => { if ( ev === 'submit' ) submitHandler = fn; },
+	};
+	const fetchCalls = [];
+	const code = fs.readFileSync( new URL( '../../wp-content/plugins/unfold/assets/js/instructor.js', import.meta.url ), 'utf8' );
+	vm.runInNewContext( code, {
+		window: { UNFOLD_PORTAL: { rest: 'http://localhost:8881/rest', nonce: 'n1' } },
+		document: { querySelector: sel => ( sel === '[data-uf-decision]' ? formEl : null ) },
+		location: { reload() {} },
+		setTimeout,
+		fetch: async ( url, opts ) => {
+			fetchCalls.push( { url, opts } );
+			return { ok: true, json: async () => ( { ok: true } ) };
+		},
+	} );
+	assert.ok( submitHandler );
+	// Returning without note warns instead of posting.
+	submitHandler( { preventDefault() {}, submitter: { value: 'changes' } } );
+	assert.match( msgEl.textContent, /Write a note/ );
+	assert.equal( noteInput.focused, true );
+	assert.equal( fetchCalls.length, 0 );
+
+	// Approve posts to /projects/77/review.
+	noteInput.value = 'Looks good';
+	submitHandler( { preventDefault() {}, submitter: { value: 'approve' } } );
+	await new Promise( r => setTimeout( r, 10 ) );
+	assert.equal( fetchCalls.length, 1 );
+	assert.equal( fetchCalls[ 0 ].url, 'http://localhost:8881/rest/projects/77/review' );
+	assert.equal( JSON.parse( fetchCalls[ 0 ].opts.body ).decision, 'approve' );
 } );
