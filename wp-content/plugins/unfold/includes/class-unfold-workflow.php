@@ -112,6 +112,12 @@ class Unfold_Workflow {
 		return $user_id && (int) get_post_field( 'post_author', $post_id ) === (int) $user_id;
 	}
 
+	/** Whether the project author can review projects directly (instructor / admin). */
+	public static function author_is_reviewer( $post_id ) {
+		$author_id = (int) get_post_field( 'post_author', $post_id );
+		return $author_id && user_can( $author_id, Unfold_Accounts::CAP_REVIEW );
+	}
+
 	public static function can_view( $post_id ) {
 		return Unfold_Post_Type::TYPE === get_post_type( $post_id )
 			&& ( current_user_can( Unfold_Accounts::CAP_REVIEW ) || ( current_user_can( Unfold_Accounts::CAP_SUBMIT ) && self::is_owner( $post_id ) ) );
@@ -555,6 +561,7 @@ class Unfold_Workflow {
 		}
 		$attached = self::attach_referenced( $post_id, $data );
 		$job      = get_post_meta( $post_id, '_unfold_job', true );
+		$job      = is_array( $job ) ? $job : array();
 		$job['finished_at'] = time();
 		$job['usage']       = array_map( 'intval', (array) ( $meta['usage'] ?? array() ) );
 		update_post_meta( $post_id, '_unfold_job', $job );
@@ -566,6 +573,7 @@ class Unfold_Workflow {
 
 	public static function fail_job( $post_id, $message ) {
 		$job          = get_post_meta( $post_id, '_unfold_job', true );
+		$job          = is_array( $job ) ? $job : array();
 		$job['error'] = sanitize_text_field( $message );
 		update_post_meta( $post_id, '_unfold_job', $job );
 		self::set_state( $post_id, 'failed', $job['error'] );
@@ -747,6 +755,10 @@ class Unfold_Workflow {
 		Unfold_Store::save( $post_id, $encoded );
 		if ( null === Unfold_Store::get( $post_id ) ) {
 			update_post_meta( $post_id, UNFOLD_META_JSON, wp_slash( wp_json_encode( $data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) ) );
+		}
+		// Projects uploaded by an instructor/reviewer skip the pending-review queue and publish directly.
+		if ( self::author_is_reviewer( $post_id ) || current_user_can( Unfold_Accounts::CAP_REVIEW ) ) {
+			return self::review( $post_id, 'approve', '' );
 		}
 		self::set_state( $post_id, 'submitted' );
 		return true;

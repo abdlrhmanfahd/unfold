@@ -151,6 +151,12 @@ test( 'Portal live extraction progress helper reflects real backend stages and s
 		Array.from( savingProg.milestones, m => m.status ),
 		[ 'done', 'done', 'done', 'active' ]
 	);
+
+	// Instructor projects skip the Instructor review step in the progress stepper.
+	const instSteps = api.stepper( 'approved', true );
+	const studSteps = api.stepper( 'submitted', false );
+	assert.equal( instSteps.includes( 'Instructor review' ), false );
+	assert.equal( studSteps.includes( 'Instructor review' ), true );
 } );
 
 test( 'Simulation templates validate path_follow and speed_loop physics checks', () => {

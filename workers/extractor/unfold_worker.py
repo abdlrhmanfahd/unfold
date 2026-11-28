@@ -1914,20 +1914,42 @@ class Site:
 COVER_PROMPT_TEMPLATE = (
     "2D vector illustration of {description}, clean thin grey outlines, soft gradient shading, "
     "subtle white highlights, semi-flat volume effect. Vibrant colors, professional cartoonish clip-art style, "
-    "isolated on a pure white background."
+    "isolated on a pure white background. No text, no words, no numbers, no letters."
 )
 
 
+def _clean_cover_phrase(text: str) -> str:
+    """Strip statistical/code filler so diffusion models draw clean physical engineering objects."""
+    cleaned = re.sub(r"\([^)]*\)", " ", text or "")
+    cleaned = re.split(r"\bcompared with\b|\bversus\b|\bvs\.?\b|\bp\s*=", cleaned, maxsplit=1, flags=re.IGNORECASE)[0]
+    cleaned = re.sub(r"\b\d+(?:\.\d+)?\s*(?:%|hz|ms|s|m/s|m|rad|deg|kb|mb)\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(?:this project (?:implements|tests|studies|investigates) whether|requiring)\b", " ", cleaned, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", cleaned).strip(" ,;:-.")
+
+
 def build_cover_prompt(data: dict) -> str:
-    """Format the 2D vector cover illustration prompt from extracted project title/description."""
+    """Format a concise visual 2D vector cover illustration prompt from project data."""
     meta = data.get("meta") or {}
-    title = str(meta.get("title") or "").strip()
-    desc = str(meta.get("short_description") or "").strip()
-    if title and desc and desc.lower() != title.lower():
+    title = re.sub(r"\s+", " ", str(meta.get("title") or "")).strip()[:80].rstrip(" ,;:-")
+    desc = _clean_cover_phrase(str(meta.get("short_description") or ""))
+    parts: list[str] = []
+    for sub in data.get("subsystems") or []:
+        if not isinstance(sub, dict):
+            continue
+        name = re.sub(r"\s+", " ", str(sub.get("name") or "")).strip()
+        if not name or re.search(r"\b(study|method|evaluation|comparison|summary|report|test)\b", name, re.IGNORECASE):
+            continue
+        if name.lower() not in (title.lower(), *(p.lower() for p in parts)):
+            parts.append(name[:40])
+        if len(parts) == 3:
+            break
+    if title and parts:
+        raw = f"{title} featuring {', '.join(parts)}"
+    elif title and desc and desc.lower() != title.lower():
         raw = f"{title} - {desc}"
     else:
         raw = title or desc or "engineering autonomous robotics project"
-    raw = re.sub(r"\s+", " ", raw).strip()[:240].rstrip(" ,;:-")
+    raw = re.sub(r"\s+", " ", raw).strip()[:160].rstrip(" ,;:-")
     return COVER_PROMPT_TEMPLATE.format(description=raw)
 
 
@@ -1939,7 +1961,7 @@ GEMINI_IMAGE_MODELS = (
 
 
 def generate_cover_image(client: LLMClient, data: dict) -> tuple[bytes, str, str] | None:
-    """Generate a 2D vector illustration for the project card using configured AI or opt-in fallback."""
+    """Generate a 2D vector illustration for the project card using configured AI or Pollinations fallback."""
     prompt = build_cover_prompt(data)
 
     if client.provider == "gemini":
@@ -1997,13 +2019,27 @@ def generate_cover_image(client: LLMClient, data: dict) -> tuple[bytes, str, str
             except Exception:  # noqa: BLE001
                 log.debug("openai image generation unavailable, trying fallback", exc_info=True)
 
-    if os.environ.get("UNFOLD_IMAGE_FALLBACK", "0") == "1":
+    # AI providers default to Pollinations fallback unless disabled; quick local_rules extract remains offline unless opted in.
+    fallback_flag = os.environ.get("UNFOLD_IMAGE_FALLBACK")
+    fallback_enabled = (fallback_flag == "1") if client.provider == "local_rules" else (fallback_flag != "0")
+    if fallback_enabled:
         try:
-            url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=640&nologo=true"
-            r = requests.get(url, timeout=45)
-            ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-            if r.ok and ct.startswith("image/") and len(r.content) > 1024:
-                return r.content, ct, prompt
+            seed = sum(ord(ch) for ch in prompt) % 100000
+            url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=640&nologo=true&seed={seed}"
+            for fb_try in range(2):
+                r = requests.get(url, timeout=45)
+                ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                if r.ok and ct.startswith("image/") and len(r.content) > 1024:
+                    return r.content, ct, prompt
+                if r.status_code in (402, 429) and fb_try == 0:
+                    m = re.search(r"retry after\s+(\d+)", r.text or "", re.IGNORECASE)
+                    wait_s = int(m.group(1)) if m else 15
+                    if wait_s <= 20:
+                        time.sleep(wait_s + 1)
+                        continue
+                err_hint = re.sub(r"\s+", " ", (r.text or "")).strip()[:160]
+                log.warning("pollinations cover fallback returned HTTP %s (%s)", r.status_code, err_hint)
+                break
         except Exception:  # noqa: BLE001
             log.debug("pollinations cover fallback failed", exc_info=True)
 
