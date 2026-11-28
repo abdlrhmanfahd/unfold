@@ -28,6 +28,48 @@
 	}
 
 	/* ------------------------------------------------------------------
+	 * Reviewer assignment (Lead Instructor / Admin)
+	 * ---------------------------------------------------------------- */
+	var assignForm = document.querySelector( '[data-uf-assign]' );
+	if ( C && assignForm ) {
+		var assignMsg = assignForm.querySelector( '.uf-assign-msg' );
+		assignForm.addEventListener( 'submit', function ( e ) {
+			e.preventDefault();
+			var btn = assignForm.querySelector( 'button[type=submit]' );
+			if ( btn ) btn.disabled = true;
+			if ( assignMsg ) assignMsg.textContent = 'Updating…';
+			fetch( C.rest + '/projects/' + assignForm.getAttribute( 'data-uf-assign' ) + '/reviewer', {
+				method: 'POST', credentials: 'same-origin',
+				headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': C.nonce },
+				body: JSON.stringify( { reviewer_id: +assignForm.reviewer_id.value || 0 } ),
+			} ).then( function ( r ) { return r.json().then( function ( j ) { if ( ! r.ok ) throw new Error( j.message || 'Failed' ); return j; } ); } )
+				.then( function () { if ( assignMsg ) assignMsg.textContent = 'Reviewer updated.'; setTimeout( function () { location.reload(); }, 500 ); } )
+				.catch( function ( err ) { if ( assignMsg ) assignMsg.textContent = err.message; if ( btn ) btn.disabled = false; } );
+		} );
+	}
+
+	/* ------------------------------------------------------------------
+	 * Team & role delegation (Lead Instructor / Admin)
+	 * ---------------------------------------------------------------- */
+	document.querySelectorAll( '[data-uf-role-select]' ).forEach( function ( sel ) {
+		var prev = sel.value;
+		sel.addEventListener( 'change', function () {
+			if ( ! C ) return;
+			var row = sel.closest( 'td' );
+			var rmsg = row ? row.querySelector( '.uf-role-msg' ) : null;
+			sel.disabled = true;
+			if ( rmsg ) rmsg.textContent = 'Saving…';
+			fetch( C.rest + '/team/role', {
+				method: 'POST', credentials: 'same-origin',
+				headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': C.nonce },
+				body: JSON.stringify( { user_id: +sel.getAttribute( 'data-user-id' ), role: sel.value } ),
+			} ).then( function ( r ) { return r.json().then( function ( j ) { if ( ! r.ok ) throw new Error( j.message || 'Failed' ); return j; } ); } )
+				.then( function () { prev = sel.value; if ( rmsg ) rmsg.textContent = 'Saved'; setTimeout( function () { location.reload(); }, 400 ); } )
+				.catch( function ( err ) { sel.value = prev; sel.disabled = false; if ( rmsg ) rmsg.textContent = err.message; } );
+		} );
+	} );
+
+	/* ------------------------------------------------------------------
 	 * Line chart: views and simulation uses per day
 	 * ---------------------------------------------------------------- */
 	var host = document.querySelector( '[data-uf-linechart]' );

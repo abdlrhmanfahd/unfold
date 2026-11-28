@@ -103,15 +103,23 @@ class Unfold_Stats {
 		$daily = array_fill_keys( $days, array( 'view' => 0, 'sim' => 0 ) );
 		$rows  = array();
 		$waits = array();
-		$now   = time();
+		$now       = time();
+		$viewer_id = get_current_user_id();
+		$is_lead   = $viewer_id ? Unfold_Accounts::can_manage_roles( $viewer_id ) : true;
 
 		foreach ( $ids as $id ) {
-			$state  = Unfold_Workflow::state( $id );
-			$t      = self::timings( Unfold_Workflow::events( $id ) );
-			$author = get_userdata( (int) get_post_field( 'post_author', $id ) );
-			$counts = get_post_meta( $id, '_unfold_daily', true );
-			$counts = is_array( $counts ) ? $counts : array();
-			$views  = array();
+			$state      = Unfold_Workflow::state( $id );
+			$can_review = $viewer_id ? Unfold_Workflow::can_review( $id, $viewer_id ) : true;
+			if ( ! $is_lead && ! $can_review && 'approved' !== $state ) {
+				continue;
+			}
+			$t             = self::timings( Unfold_Workflow::events( $id ) );
+			$author        = get_userdata( (int) get_post_field( 'post_author', $id ) );
+			$reviewer_id   = Unfold_Workflow::assigned_reviewer( $id );
+			$reviewer_name = $reviewer_id ? Unfold_Workflow::reviewer_name( $id ) : '';
+			$counts        = get_post_meta( $id, '_unfold_daily', true );
+			$counts        = is_array( $counts ) ? $counts : array();
+			$views         = array();
 			foreach ( $days as $d ) {
 				$views[]                = (int) ( $counts[ $d ]['view'] ?? 0 );
 				$daily[ $d ]['view']   += (int) ( $counts[ $d ]['view'] ?? 0 );
@@ -119,22 +127,25 @@ class Unfold_Stats {
 			}
 			$waits  = array_merge( $waits, $t['waits'] );
 			$rows[] = array(
-				'id'          => $id,
-				'title'       => get_the_title( $id ),
-				'state'       => $state,
-				'owner'       => $author ? $author->display_name : '—',
-				'waiting'     => 'submitted' === $state && $t['pending_since'] ? $now - $t['pending_since'] : null,
-				'modified'    => (int) get_post_timestamp( $id, 'modified' ),
-				'daily_views' => $views,
-				'sim_uses'    => (int) get_post_meta( $id, '_unfold_sim_uses', true ),
-				'url'         => 'approved' === $state ? get_permalink( $id ) : null,
+				'id'            => $id,
+				'title'         => get_the_title( $id ),
+				'state'         => $state,
+				'owner'         => $author ? $author->display_name : '—',
+				'reviewer_id'   => $reviewer_id,
+				'reviewer_name' => $reviewer_name,
+				'can_review'    => $can_review,
+				'waiting'       => 'submitted' === $state && $t['pending_since'] ? $now - $t['pending_since'] : null,
+				'modified'      => (int) get_post_timestamp( $id, 'modified' ),
+				'daily_views'   => $views,
+				'sim_uses'      => (int) get_post_meta( $id, '_unfold_sim_uses', true ),
+				'url'           => 'approved' === $state ? get_permalink( $id ) : null,
 			);
 		}
 
 		sort( $waits );
 		$n      = count( $waits );
 		$median = $n ? ( $n % 2 ? $waits[ intdiv( $n, 2 ) ] : ( $waits[ $n / 2 - 1 ] + $waits[ $n / 2 ] ) / 2 ) : null;
-		$queue  = array_values( array_filter( $rows, static function ( $r ) { return 'submitted' === $r['state']; } ) );
+		$queue  = array_values( array_filter( $rows, static function ( $r ) { return 'submitted' === $r['state'] && ! empty( $r['can_review'] ); } ) );
 		usort( $queue, static function ( $a, $b ) { return $b['waiting'] <=> $a['waiting']; } );
 		$count  = static function ( $state ) use ( $rows ) {
 			return count( array_filter( $rows, static function ( $r ) use ( $state ) { return $state === $r['state']; } ) );

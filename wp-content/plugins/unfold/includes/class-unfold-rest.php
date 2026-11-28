@@ -24,6 +24,9 @@ class Unfold_Rest {
 		$reviewer = static function () {
 			return current_user_can( Unfold_Accounts::CAP_REVIEW );
 		};
+		$role_mgr = static function () {
+			return Unfold_Accounts::can_manage_roles();
+		};
 		$worker   = array( __CLASS__, 'worker_auth' );
 		$id_arg   = array( 'id' => array( 'validate_callback' => static function ( $v ) { return is_numeric( $v ); } ) );
 
@@ -44,6 +47,8 @@ class Unfold_Rest {
 		register_rest_route( self::NS, '/projects/(?P<id>\d+)/extract', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'project_extract' ), 'permission_callback' => $member, 'args' => $id_arg ) );
 		register_rest_route( self::NS, '/projects/(?P<id>\d+)/preview', array( 'methods' => 'GET', 'callback' => array( __CLASS__, 'project_preview' ), 'permission_callback' => $member, 'args' => $id_arg ) );
 		register_rest_route( self::NS, '/projects/(?P<id>\d+)/review', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'project_review' ), 'permission_callback' => $reviewer, 'args' => $id_arg ) );
+		register_rest_route( self::NS, '/projects/(?P<id>\d+)/reviewer', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'project_assign_reviewer' ), 'permission_callback' => $role_mgr, 'args' => $id_arg ) );
+		register_rest_route( self::NS, '/team/role', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'team_set_role' ), 'permission_callback' => $role_mgr ) );
 
 		// Public engagement beacon.
 		register_rest_route( self::NS, '/track', array( 'methods' => 'POST', 'callback' => array( 'Unfold_Stats', 'track' ), 'permission_callback' => '__return_true' ) );
@@ -146,6 +151,9 @@ class Unfold_Rest {
 			'typical_s'  => Unfold_Workflow::typical_read_seconds(),
 			'editable'   => Unfold_Workflow::can_edit( $id ),
 			'direct_publish' => Unfold_Workflow::author_is_reviewer( $id ) || current_user_can( Unfold_Accounts::CAP_REVIEW ),
+			'reviewer_id' => Unfold_Workflow::assigned_reviewer( $id ),
+			'reviewer_name' => Unfold_Workflow::reviewer_name( $id ),
+			'reviewers'  => Unfold_Accounts::reviewers(),
 			'data'       => is_array( $data ) ? $data : null,
 			'errors'     => Unfold_Store::get_errors( $id ),
 			'valid'      => (bool) Unfold_Store::get( $id ) && ! Unfold_Store::get_errors( $id ),
@@ -200,7 +208,14 @@ class Unfold_Rest {
 		if ( $err ) {
 			return $err;
 		}
-		$res = Unfold_Workflow::submit( $id );
+		$body        = $r->get_json_params();
+		$reviewer_id = null;
+		if ( is_array( $body ) && array_key_exists( 'reviewer_id', $body ) ) {
+			$reviewer_id = absint( $body['reviewer_id'] );
+		} elseif ( $r->has_param( 'reviewer_id' ) ) {
+			$reviewer_id = absint( $r['reviewer_id'] );
+		}
+		$res = Unfold_Workflow::submit( $id, $reviewer_id );
 		return is_wp_error( $res ) ? $res : self::project_payload( $id );
 	}
 
@@ -245,8 +260,29 @@ class Unfold_Rest {
 		if ( Unfold_Post_Type::TYPE !== get_post_type( $id ) ) {
 			return new WP_Error( 'unfold_missing', __( 'Project not found.', 'unfold' ), array( 'status' => 404 ) );
 		}
+		if ( ! Unfold_Workflow::can_review( $id ) ) {
+			return new WP_Error( 'unfold_forbidden', __( 'This project is assigned to another instructor.', 'unfold' ), array( 'status' => 403 ) );
+		}
 		$res = Unfold_Workflow::review( $id, sanitize_key( (string) $r['decision'] ), sanitize_textarea_field( (string) $r['note'] ) );
 		return is_wp_error( $res ) ? $res : self::project_payload( $id );
+	}
+
+	public static function project_assign_reviewer( WP_REST_Request $r ) {
+		$id = (int) $r['id'];
+		if ( Unfold_Post_Type::TYPE !== get_post_type( $id ) ) {
+			return new WP_Error( 'unfold_missing', __( 'Project not found.', 'unfold' ), array( 'status' => 404 ) );
+		}
+		$body        = $r->get_json_params();
+		$reviewer_id = is_array( $body ) && array_key_exists( 'reviewer_id', $body ) ? absint( $body['reviewer_id'] ) : absint( $r['reviewer_id'] );
+		$res         = Unfold_Workflow::set_reviewer( $id, $reviewer_id );
+		return is_wp_error( $res ) ? $res : self::project_payload( $id );
+	}
+
+	public static function team_set_role( WP_REST_Request $r ) {
+		$body = $r->get_json_params();
+		$uid  = is_array( $body ) && array_key_exists( 'user_id', $body ) ? absint( $body['user_id'] ) : absint( $r['user_id'] );
+		$role = sanitize_key( (string) ( is_array( $body ) && array_key_exists( 'role', $body ) ? $body['role'] : $r['role'] ) );
+		return Unfold_Accounts::set_portal_role( get_current_user_id(), $uid, $role );
 	}
 
 	/* ---------------------------------------------------------------------

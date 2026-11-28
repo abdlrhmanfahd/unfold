@@ -250,6 +250,9 @@ class Unfold_Portals {
 			'projects' => __( 'All projects', 'unfold' ),
 			'worlds'   => __( '3D worlds', 'unfold' ),
 		);
+		if ( Unfold_Accounts::can_manage_roles() ) {
+			$tabs['team'] = __( 'Team & roles', 'unfold' );
+		}
 		$nav = '<nav class="uf-ptabs" aria-label="' . esc_attr__( 'Instructor menu', 'unfold' ) . '">';
 		foreach ( $tabs as $k => $label ) {
 			$nav .= '<a href="' . esc_url( self::url( 'instructor', array( 'tab' => $k ) ) ) . '"' . ( $k === $tab ? ' aria-current="page"' : '' ) . '>' . esc_html( $label ) . '</a>';
@@ -262,6 +265,8 @@ class Unfold_Portals {
 			$body = self::projects_table( $o['rows'] );
 		} elseif ( 'worlds' === $tab ) {
 			$body = Unfold_Worlds::worlds_tab();
+		} elseif ( 'team' === $tab && Unfold_Accounts::can_manage_roles() ) {
+			$body = self::team_tab();
 		} else {
 			$body = self::overview_html( $o );
 		}
@@ -330,10 +335,12 @@ class Unfold_Portals {
 		if ( ! $queue ) {
 			return '<div class="uf-empty-box"><p>' . esc_html__( 'Nothing is waiting for review.', 'unfold' ) . '</p></div>';
 		}
-		$out = '<div class="uf-table-wrap"><table class="uf-table"><thead><tr><th scope="col">' . esc_html__( 'Project', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Submitted by', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Waiting', 'unfold' ) . '</th><th scope="col"></th></tr></thead><tbody>';
+		$out = '<div class="uf-table-wrap"><table class="uf-table"><thead><tr><th scope="col">' . esc_html__( 'Project', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Submitted by', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Reviewer', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Waiting', 'unfold' ) . '</th><th scope="col"></th></tr></thead><tbody>';
 		foreach ( $queue as $r ) {
+			$rev = $r['reviewer_name'] ? $r['reviewer_name'] : __( 'Lead / Unassigned', 'unfold' );
 			$out .= '<tr><td data-label="' . esc_attr__( 'Project', 'unfold' ) . '"><strong>' . esc_html( $r['title'] ) . '</strong></td>'
 				. '<td data-label="' . esc_attr__( 'Submitted by', 'unfold' ) . '">' . esc_html( $r['owner'] ) . '</td>'
+				. '<td data-label="' . esc_attr__( 'Reviewer', 'unfold' ) . '">' . esc_html( $rev ) . '</td>'
 				. '<td data-label="' . esc_attr__( 'Waiting', 'unfold' ) . '">' . esc_html( Unfold_Stats::human_duration( $r['waiting'] ) ) . '</td>'
 				. '<td><a class="uf-btn uf-btn--small" href="' . esc_url( self::url( 'instructor', array( 'review' => $r['id'] ) ) ) . '">' . esc_html__( 'Open', 'unfold' ) . '</a></td></tr>';
 		}
@@ -345,15 +352,58 @@ class Unfold_Portals {
 			return '<p class="uf-muted">' . esc_html__( 'No projects yet.', 'unfold' ) . '</p>';
 		}
 		usort( $rows, static function ( $a, $b ) { return $b['modified'] <=> $a['modified']; } );
-		$out = '<div class="uf-table-wrap"><table class="uf-table"><thead><tr><th scope="col">' . esc_html__( 'Project', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Status', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Owner', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Updated', 'unfold' ) . '</th><th scope="col"></th></tr></thead><tbody>';
+		$out = '<div class="uf-table-wrap"><table class="uf-table"><thead><tr><th scope="col">' . esc_html__( 'Project', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Status', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Owner', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Reviewer', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Updated', 'unfold' ) . '</th><th scope="col"></th></tr></thead><tbody>';
 		foreach ( $rows as $r ) {
+			$rev = $r['reviewer_name'] ? $r['reviewer_name'] : '—';
 			$out .= '<tr><td data-label="' . esc_attr__( 'Project', 'unfold' ) . '"><strong>' . esc_html( $r['title'] ) . '</strong>' . ( $r['url'] ? '<br><a href="' . esc_url( $r['url'] ) . '">' . esc_html__( 'View live', 'unfold' ) . ' ↗</a>' : '' ) . '</td>'
 				. '<td data-label="' . esc_attr__( 'Status', 'unfold' ) . '"><span class="uf-state uf-state--' . esc_attr( $r['state'] ) . '">' . esc_html( self::state_label( $r['state'], 1 ) ) . '</span></td>'
 				. '<td data-label="' . esc_attr__( 'Owner', 'unfold' ) . '">' . esc_html( $r['owner'] ) . '</td>'
+				. '<td data-label="' . esc_attr__( 'Reviewer', 'unfold' ) . '">' . esc_html( $rev ) . '</td>'
 				. '<td data-label="' . esc_attr__( 'Updated', 'unfold' ) . '">' . esc_html( sprintf( __( '%s ago', 'unfold' ), human_time_diff( $r['modified'] ) ) ) . '</td>'
 				. '<td><a class="uf-btn uf-btn--small uf-btn--ghost" href="' . esc_url( self::url( 'instructor', array( 'review' => $r['id'] ) ) ) . '">' . esc_html__( 'Open', 'unfold' ) . '</a></td></tr>';
 		}
 		return $out . '</tbody></table></div>';
+	}
+
+	/** Lead Instructor / Admin view: delegate or revoke Instructor review authority. */
+	private static function team_tab() {
+		$users    = Unfold_Accounts::portal_users();
+		$is_admin = current_user_can( 'manage_options' );
+		$out      = '<section class="uf-panel-box"><h2 class="uf-h3">' . esc_html__( 'Instructors & members', 'unfold' ) . '</h2>'
+			. '<p class="uf-muted">' . esc_html__( 'Grant Instructor access to verified members so they can review assigned student submissions and publish directly.', 'unfold' ) . '</p>';
+		if ( ! $users ) {
+			return $out . '<p class="uf-muted">' . esc_html__( 'No member accounts registered yet.', 'unfold' ) . '</p></section>';
+		}
+		$out .= '<div class="uf-table-wrap"><table class="uf-table"><thead><tr><th scope="col">' . esc_html__( 'Name', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Email', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Account', 'unfold' ) . '</th><th scope="col">' . esc_html__( 'Role & review authority', 'unfold' ) . '</th></tr></thead><tbody>';
+		foreach ( $users as $u ) {
+			$locked = $u['is_self'] || ( 'lead' === $u['role'] && ! $is_admin ) || ! $u['verified'];
+			$opts   = array(
+				'member'     => array( 'unfold_member', __( 'Member (submit own)', 'unfold' ) ),
+				'instructor' => array( 'unfold_instructor', __( 'Instructor (can review assigned)', 'unfold' ) ),
+			);
+			if ( $is_admin || 'lead' === $u['role'] ) {
+				$opts['lead'] = array( 'unfold_lead_instructor', __( 'Lead Instructor (full access + roles)', 'unfold' ) );
+			}
+			$sel = '<select class="uf-role-select" data-uf-role-select data-user-id="' . esc_attr( $u['id'] ) . '"' . ( $locked ? ' disabled' : '' ) . '>';
+			foreach ( $opts as $k => $pair ) {
+				$sel .= '<option value="' . esc_attr( $pair[0] ) . '"' . ( $k === $u['role'] ? ' selected' : '' ) . '>' . esc_html( $pair[1] ) . '</option>';
+			}
+			$sel .= '</select>';
+			if ( ! $u['verified'] ) {
+				$status = '<span class="uf-state uf-state--failed">' . esc_html__( 'Email unverified', 'unfold' ) . '</span>';
+			} elseif ( 'lead' === $u['role'] ) {
+				$status = '<span class="uf-state uf-state--approved">' . esc_html__( 'Lead Instructor', 'unfold' ) . '</span>';
+			} elseif ( 'instructor' === $u['role'] ) {
+				$status = '<span class="uf-state uf-state--submitted">' . esc_html__( 'Instructor', 'unfold' ) . '</span>';
+			} else {
+				$status = '<span class="uf-state">' . esc_html__( 'Member', 'unfold' ) . '</span>';
+			}
+			$out .= '<tr><td data-label="' . esc_attr__( 'Name', 'unfold' ) . '"><strong>' . esc_html( $u['name'] ) . '</strong>' . ( $u['is_self'] ? ' <span class="uf-muted">(' . esc_html__( 'you', 'unfold' ) . ')</span>' : '' ) . '</td>'
+				. '<td data-label="' . esc_attr__( 'Email', 'unfold' ) . '">' . esc_html( $u['email'] ) . '</td>'
+				. '<td data-label="' . esc_attr__( 'Account', 'unfold' ) . '">' . $status . '</td>'
+				. '<td data-label="' . esc_attr__( 'Role & review authority', 'unfold' ) . '" class="uf-role-cell">' . $sel . '<span class="uf-role-msg" aria-live="polite"></span></td></tr>';
+		}
+		return $out . '</tbody></table></div></section>';
 	}
 
 	/** The instructor only decides: accept, or return with notes. */
@@ -380,23 +430,39 @@ class Unfold_Portals {
 				break;
 			}
 		}
-		$last = Unfold_Workflow::last_review_note( $id );
+		$last      = Unfold_Workflow::last_review_note( $id );
+		$rev_id    = Unfold_Workflow::assigned_reviewer( $id );
+		$rev_name  = $rev_id ? Unfold_Workflow::reviewer_name( $id ) : __( 'Lead / Unassigned', 'unfold' );
+		$can_act   = Unfold_Workflow::can_review( $id );
+		$can_roles = Unfold_Accounts::can_manage_roles();
 
 		$side  = '<aside class="uf-review-side"><div class="uf-review-card">';
 		$side .= '<p><span class="uf-state uf-state--' . esc_attr( $state ) . '">' . esc_html( self::state_label( $state, 1 ) ) . '</span></p>';
 		$side .= '<p class="uf-muted">' . esc_html( ( $owner ? $owner->display_name : '—' ) . ( $submitted ? ' · ' . sprintf( __( 'submitted %s ago', 'unfold' ), human_time_diff( $submitted ) ) : '' ) ) . '</p>';
-		$side .= '<form class="uf-decision" data-uf-decision="' . esc_attr( $id ) . '">';
-		if ( 'approved' === $state ) {
-			$side .= '<p>' . esc_html__( 'This project is live.', 'unfold' ) . '</p><label class="uf-field"><span>' . esc_html__( 'Notes (optional)', 'unfold' ) . '</span><textarea name="note" rows="3"></textarea></label>'
-				. '<div class="uf-decision-btns"><button class="uf-btn uf-btn--ghost" type="submit" name="decision" value="unpublish">' . esc_html__( 'Take offline and return with notes', 'unfold' ) . '</button></div>';
-		} elseif ( 'submitted' === $state ) {
-			$side .= '<label class="uf-field"><span>' . esc_html__( 'Notes', 'unfold' ) . '</span><textarea name="note" rows="5" placeholder="' . esc_attr__( 'Needed when you return the project. Optional when you accept.', 'unfold' ) . '"></textarea></label>'
-				. '<div class="uf-decision-btns"><button class="uf-btn uf-btn--approve" type="submit" name="decision" value="approve">' . esc_html__( 'Accept & publish', 'unfold' ) . '</button>'
-				. '<button class="uf-btn uf-btn--ghost" type="submit" name="decision" value="changes">' . esc_html__( 'Return with notes', 'unfold' ) . '</button></div>';
-		} else {
-			$side .= '<p class="uf-muted">' . esc_html__( 'Not submitted for review yet.', 'unfold' ) . '</p>';
+		$side .= '<p class="uf-muted"><strong>' . esc_html__( 'Reviewer:', 'unfold' ) . '</strong> ' . esc_html( $rev_name ) . '</p>';
+		if ( $can_roles && ! Unfold_Workflow::author_is_reviewer( $id ) ) {
+			$side .= '<form class="uf-assign-form" data-uf-assign="' . esc_attr( $id ) . '"><label class="uf-field"><span>' . esc_html__( 'Assign reviewer', 'unfold' ) . '</span><select name="reviewer_id"><option value="0">' . esc_html__( 'Lead / Unassigned', 'unfold' ) . '</option>';
+			foreach ( Unfold_Accounts::reviewers() as $rv ) {
+				$side .= '<option value="' . esc_attr( $rv['id'] ) . '"' . ( (int) $rv['id'] === $rev_id ? ' selected' : '' ) . '>' . esc_html( $rv['name'] . ( $rv['is_lead'] ? ' (Lead)' : '' ) ) . '</option>';
+			}
+			$side .= '</select></label><button class="uf-btn uf-btn--small uf-btn--ghost" type="submit">' . esc_html__( 'Update reviewer', 'unfold' ) . '</button><span class="uf-assign-msg" role="status"></span></form>';
 		}
-		$side .= '<p class="uf-decision-msg" role="status"></p></form>';
+		if ( $can_act ) {
+			$side .= '<form class="uf-decision" data-uf-decision="' . esc_attr( $id ) . '">';
+			if ( 'approved' === $state ) {
+				$side .= '<p>' . esc_html__( 'This project is live.', 'unfold' ) . '</p><label class="uf-field"><span>' . esc_html__( 'Notes (optional)', 'unfold' ) . '</span><textarea name="note" rows="3"></textarea></label>'
+					. '<div class="uf-decision-btns"><button class="uf-btn uf-btn--ghost" type="submit" name="decision" value="unpublish">' . esc_html__( 'Take offline and return with notes', 'unfold' ) . '</button></div>';
+			} elseif ( 'submitted' === $state ) {
+				$side .= '<label class="uf-field"><span>' . esc_html__( 'Notes', 'unfold' ) . '</span><textarea name="note" rows="5" placeholder="' . esc_attr__( 'Needed when you return the project. Optional when you accept.', 'unfold' ) . '"></textarea></label>'
+					. '<div class="uf-decision-btns"><button class="uf-btn uf-btn--approve" type="submit" name="decision" value="approve">' . esc_html__( 'Accept & publish', 'unfold' ) . '</button>'
+					. '<button class="uf-btn uf-btn--ghost" type="submit" name="decision" value="changes">' . esc_html__( 'Return with notes', 'unfold' ) . '</button></div>';
+			} else {
+				$side .= '<p class="uf-muted">' . esc_html__( 'Not submitted for review yet.', 'unfold' ) . '</p>';
+			}
+			$side .= '<p class="uf-decision-msg" role="status"></p></form>';
+		} else {
+			$side .= '<p class="uf-muted">' . esc_html__( 'Only the assigned reviewer or a Lead Instructor can approve or moderate this project.', 'unfold' ) . '</p>';
+		}
 		if ( $last && '' !== $last['note'] ) {
 			$side .= '<p class="uf-last-note"><span class="uf-muted">' . esc_html__( 'Last notes:', 'unfold' ) . '</span> ' . esc_html( $last['note'] ) . '</p>';
 		}
