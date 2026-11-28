@@ -28,7 +28,11 @@
 			var a = document.createElement( 'a' );
 			a.className = 'uf-halo-pill uf-halo-pill--' + ( it.k === 'w' ? 'world' : 'project' );
 			a.href = it.u;
-			a.textContent = it.n;
+			a.title = it.n;
+			var span = document.createElement( 'span' );
+			span.className = 'uf-halo-txt';
+			span.textContent = it.n;
+			a.appendChild( span );
 			wrap.appendChild( a );
 			return a;
 		} );
@@ -67,11 +71,13 @@
 						if ( ! p ) continue;
 						var c = car.screen( 0, Y, 0 ), back = p.z > c.z;          // farther than the car's centre
 						var el = els[ i ];
-						el.style.transform = 'translate(' + p.x.toFixed( 1 ) + 'px,' + p.y.toFixed( 1 ) + 'px) translate(-50%,-50%) scale(' + ( back ? 0.88 : 1 ) + ')';
-						// passing under the headline or buttons: step aside (almost invisible, not clickable)
-						var w2 = el.offsetWidth / 2 + 8, h2 = el.offsetHeight / 2 + 8;
-						var over = copy && p.x + w2 > copy.l && p.x - w2 < copy.r && p.y + h2 > copy.t && p.y - h2 < copy.b;
-						el.style.opacity = over ? 0.08 : back ? 0.42 : 1;
+						var hw = el.offsetWidth / 2 + 10;
+						var px = Math.max( hw, Math.min( stage.clientWidth - hw, p.x ) );
+						el.style.transform = 'translate(' + px.toFixed( 1 ) + 'px,' + p.y.toFixed( 1 ) + 'px) translate(-50%,-50%) scale(' + ( back ? 0.88 : 1 ) + ')';
+						// passing under the headline or buttons: hide cleanly so copy stays legible
+						var w2 = hw + 4, h2 = el.offsetHeight / 2 + 12;
+						var over = copy && px + w2 > copy.l && px - w2 < copy.r && p.y + h2 > copy.t && p.y - h2 < copy.b;
+						el.style.opacity = over ? 0 : back ? 0.52 : 1;
 						el.style.pointerEvents = over ? 'none' : '';
 						el.style.zIndex = back ? 1 : 3;
 					}

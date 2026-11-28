@@ -70,10 +70,20 @@ class Unfold_Render {
 	}
 
 	private static function label( $group, $value ) {
+		if ( is_array( $value ) ) {
+			$parts = array();
+			foreach ( $value as $item ) {
+				$lbl = self::label( $group, $item );
+				if ( null !== $lbl && '' !== $lbl ) {
+					$parts[] = $lbl;
+				}
+			}
+			return $parts ? implode( ', ', $parts ) : null;
+		}
 		if ( null === $value || '' === $value ) {
 			return null;
 		}
-		return self::LABELS[ $group ][ $value ] ?? ucfirst( str_replace( '_', ' ', $value ) );
+		return self::LABELS[ $group ][ $value ] ?? ucfirst( str_replace( '_', ' ', (string) $value ) );
 	}
 
 	private static function humanize( $slug ) {
@@ -270,15 +280,14 @@ class Unfold_Render {
 		$parts = array_slice( $d['subsystems'], 0, 4 );
 		$n     = max( 1, count( $parts ) );
 		$w     = 320;
-		$gap   = 14;
-		$bw    = min( 78, ( $w - 36 - $gap * ( $n - 1 ) ) / $n );
+		$gap   = 12;
+		$bw    = min( 76, ( $w - 44 - $gap * ( $n - 1 ) ) / $n );
 		$x0    = ( $w - ( $bw * $n + $gap * ( $n - 1 ) ) ) / 2;
-		$svg   = '<svg viewBox="0 0 320 180" aria-hidden="true"><rect width="320" height="180" fill="#F5F7F9"/>';
+		$svg   = '<svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><rect width="320" height="180" fill="#F8FAFC"/>';
 		foreach ( $parts as $i => $sub ) {
 			$x   = $x0 + $i * ( $bw + $gap );
 			$on  = 0 === $i % 2;
-			// Wrap the name into at most two lines that fit the block.
-			$max   = max( 6, (int) floor( $bw / 5.6 ) );
+			$max   = max( 6, (int) floor( $bw / 5.8 ) );
 			$lines = array( '' );
 			foreach ( preg_split( '/\s+/', $sub['name'] ) as $word ) {
 				$try = trim( end( $lines ) . ' ' . $word );
@@ -293,17 +302,17 @@ class Unfold_Render {
 			}
 			$lines = array_map( static function ( $l ) use ( $max ) { return mb_strimwidth( $l, 0, $max, '…' ); }, $lines );
 			if ( $i ) {
-				$svg .= '<path d="M' . round( $x - $gap, 1 ) . ' 90h' . $gap . '" stroke="#9AA7B4" stroke-width="1.5"/>';
+				$svg .= '<path d="M' . round( $x - $gap, 1 ) . ' 88h' . $gap . '" stroke="#9AA7B4" stroke-width="1.5"/>';
 			}
-			$svg .= '<rect x="' . round( $x, 1 ) . '" y="64" width="' . round( $bw, 1 ) . '" height="52" rx="6" fill="' . ( $on ? '#E3F5F1' : '#fff' ) . '" stroke="' . ( $on ? '#0B8A7A' : '#C5CED8' ) . '" stroke-width="1.5"/>'
-				. '<text text-anchor="middle" font-family="Onest, sans-serif" font-size="10.5" font-weight="600" fill="#0F1720">';
-			$y0   = 2 === count( $lines ) ? 87 : 94;
+			$svg .= '<rect x="' . round( $x, 1 ) . '" y="62" width="' . round( $bw, 1 ) . '" height="52" rx="8" fill="' . ( $on ? '#E3F5F1' : '#fff' ) . '" stroke="' . ( $on ? '#0B8A7A' : '#CBD5E1' ) . '" stroke-width="1.5"/>'
+				. '<text text-anchor="middle" font-family="Onest, sans-serif" font-size="10" font-weight="600" fill="#0F1720">';
+			$y0   = 2 === count( $lines ) ? 84 : 92;
 			foreach ( $lines as $k => $l ) {
 				$svg .= '<tspan x="' . round( $x + $bw / 2, 1 ) . '" y="' . ( $y0 + 13 * $k ) . '">' . esc_html( $l ) . '</tspan>';
 			}
 			$svg .= '</text>';
 		}
-		return $svg . '</svg><span class="uf-card-auto">' . esc_html__( 'Drawn from the project’s parts', 'unfold' ) . '</span>';
+		return $svg . '</svg><span class="uf-card-auto">' . esc_html__( 'Drawn from subsystems', 'unfold' ) . '</span>';
 	}
 
 	/* ---------------------------------------------------------------------
@@ -969,18 +978,20 @@ class Unfold_Render {
 		);
 		$items = array_slice( $items, 0, max( 1, (int) $atts['limit'] ) );
 
-		foreach ( $items as $it ) {
+		foreach ( $items as $idx => $it ) {
 			list( $p, $d ) = $it;
-			$m    = $d['meta'];
+			$m     = $d['meta'];
 			foreach ( $m['keywords'] as $k ) {
 				$keywords[ $k ] = true;
 			}
 			$credit = self::credit( $d );
-			$mode  = self::label( 'mode', $m['platform']['mode'] );
-			$play  = self::playable( $d );
-			$cover = self::cover_image( $p->ID, $d );
+			$mode   = self::label( 'mode', $m['platform']['mode'] );
+			$stack  = self::label( 'stack', $m['platform']['software_stack'] ?? null );
+			$play   = self::playable( $d );
+			$cover  = self::cover_image( $p->ID, $d );
+			$search = strtolower( $m['title'] . ' ' . $m['short_description'] . ' ' . $credit . ' ' . implode( ' ', $m['keywords'] ) );
 
-			$cards .= '<li class="uf-card" data-keywords="' . esc_attr( wp_json_encode( array_values( $m['keywords'] ) ) ) . '">'
+			$cards .= '<li class="uf-card" data-order="' . esc_attr( $idx ) . '" data-date="' . esc_attr( (string) get_post_timestamp( $p ) ) . '" data-title="' . esc_attr( strtolower( $m['title'] ) ) . '" data-search="' . esc_attr( $search ) . '" data-keywords="' . esc_attr( wp_json_encode( array_values( $m['keywords'] ) ) ) . '">'
 				. '<a class="uf-card-link" href="' . esc_url( get_permalink( $p ) ) . '">'
 				. '<div class="uf-card-media">' . ( $cover ? wp_get_attachment_image( $cover, 'medium_large', false, array( 'alt' => '', 'loading' => 'lazy' ) ) : self::auto_picture( $d ) ) . '</div>'
 				. '<div class="uf-card-body">'
@@ -991,7 +1002,7 @@ class Unfold_Render {
 				. '<span>' . self::icon( 'split' ) . esc_html( sprintf( _n( '%d subsystem', '%d subsystems', count( $d['subsystems'] ), 'unfold' ), count( $d['subsystems'] ) ) ) . '</span>'
 				. '</p>'
 				. ( self::has_text( $m['short_description'] ) ? '<p class="uf-card-desc">' . esc_html( wp_trim_words( $m['short_description'], 26 ) ) . '</p>' : '' )
-				. ( $credit ? '<p class="uf-card-kv"><span>' . esc_html( $credit ) . '</span></p>' : '' )
+				. '<p class="uf-card-kv"><span>' . esc_html( $credit ? $credit : ( $stack ? $stack : __( 'Engineering project', 'unfold' ) ) ) . '</span><span class="uf-card-go">' . esc_html__( 'Explore →', 'unfold' ) . '</span></p>'
 				. '</div></a></li>';
 		}
 
@@ -1006,13 +1017,17 @@ class Unfold_Render {
 			return $out . '<p class="uf-empty">' . esc_html__( 'No projects have been published yet.', 'unfold' ) . '</p></div>';
 		}
 
-		if ( 'yes' === $atts['filters'] && count( $keywords ) > 1 ) {
+		if ( 'yes' === $atts['filters'] ) {
 			$out .= '<form class="uf-filters" role="search" onsubmit="return false">';
-			$out .= '<label><span>' . esc_html__( 'Topic', 'unfold' ) . '</span><select data-uf-filter="keyword"><option value="">' . esc_html__( 'All topics', 'unfold' ) . '</option>';
-			foreach ( array_keys( $keywords ) as $k ) {
-				$out .= '<option value="' . esc_attr( $k ) . '">' . esc_html( $k ) . '</option>';
+			$out .= '<label class="uf-filter-search"><span>' . esc_html__( 'Search', 'unfold' ) . '</span><input type="search" data-uf-search placeholder="' . esc_attr__( 'Search title, description, topic…', 'unfold' ) . '"></label>';
+			if ( count( $keywords ) > 1 ) {
+				$out .= '<label><span>' . esc_html__( 'Topic', 'unfold' ) . '</span><select data-uf-filter="keyword"><option value="">' . esc_html__( 'All topics', 'unfold' ) . '</option>';
+				foreach ( array_keys( $keywords ) as $k ) {
+					$out .= '<option value="' . esc_attr( $k ) . '">' . esc_html( $k ) . '</option>';
+				}
+				$out .= '</select></label>';
 			}
-			$out .= '</select></label>';
+			$out .= '<label><span>' . esc_html__( 'Sort', 'unfold' ) . '</span><select data-uf-sort><option value="featured">' . esc_html__( 'Most interactive', 'unfold' ) . '</option><option value="newest">' . esc_html__( 'Newest first', 'unfold' ) . '</option><option value="az">' . esc_html__( 'Title A–Z', 'unfold' ) . '</option></select></label>';
 			$out .= '<p class="uf-count" aria-live="polite" data-uf-count>' . esc_html( sprintf( _n( '%d project', '%d projects', count( $items ), 'unfold' ), count( $items ) ) ) . '</p>';
 			$out .= '</form>';
 		}
