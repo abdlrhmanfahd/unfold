@@ -246,6 +246,8 @@ class ExtractorWorkerTests(unittest.TestCase):
         payload = fake_site.result.call_args.args[1]
         self.assertEqual(payload["meta"]["model"], "local_rules")
         self.assertEqual(payload["data"]["schema_version"], "0.2")
+        stages = [call.args[1] for call in fake_site.progress.call_args_list]
+        self.assertEqual(stages, ["downloading", "scanning", "saving"])
 
     def test_build_cover_prompt_uses_required_vector_style(self):
         prompt = uw.build_cover_prompt({
