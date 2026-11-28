@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Unfold
  * Description:       Presents engineering projects as interactive, explorable systems: block diagrams, subsystem simulations and results vs targets, all rendered from one project JSON document.
- * Version:           0.3.0
+ * Version:           0.3.1
  * Requires at least: 6.7
  * Requires PHP:      7.4
  * Author:            Unfold
@@ -12,7 +12,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'UNFOLD_VERSION', '0.3.0' );
+define( 'UNFOLD_VERSION', '0.3.1' );
 define( 'UNFOLD_FILE', __FILE__ );
 define( 'UNFOLD_DIR', plugin_dir_path( __FILE__ ) );
 define( 'UNFOLD_URL', plugin_dir_url( __FILE__ ) );

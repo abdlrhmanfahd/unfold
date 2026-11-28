@@ -273,3 +273,8 @@
 .uf-extract-stages { list-style: none; margin: 0 0 var(--uf-s2); padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .84rem; color: var(--uf-muted); }
 .uf-extract-stages li.is-done { color: var(--uf-ok); font-weight: 600; }
 .uf-extract-stages li.is-active { color: var(--uf-accent-ink); font-weight: 700; }
+.uf-reviewer-pick { display: inline-flex; align-items: center; gap: 6px; font-size: .88rem; color: var(--uf-ink-2); }
+.uf-reviewer-pick select, .uf-role-select { font: inherit; font-size: .88rem; padding: 6px 10px; border: 1px solid var(--uf-line); border-radius: 8px; background: #fff; color: var(--uf-ink); }
+.uf-assign-form { display: grid; gap: 8px; padding: var(--uf-s3) 0; margin: var(--uf-s2) 0; border-top: 1px solid var(--uf-line); border-bottom: 1px solid var(--uf-line); }
+.uf-assign-msg, .uf-role-msg { font-size: .82rem; color: var(--uf-muted); margin-left: 8px; }
+.uf-role-cell { white-space: nowrap; }

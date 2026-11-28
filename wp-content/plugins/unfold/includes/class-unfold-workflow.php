@@ -35,6 +35,7 @@ class Unfold_Workflow {
 	const MAX_ATTACH_BYTES   = 26214400;   // 25 MB per file copied to the media library.
 	const CHUNK_BYTES        = 8388608;    // 8 MB upload chunks.
 	const CLAIM_TIMEOUT      = 1800;       // A claimed job is re-queued after 30 min without a result.
+	const META_REVIEWER      = '_unfold_reviewer_id';
 
 	/** Extensions never copied anywhere (only listed in the manifest). */
 	const BLOCKED_EXT = array( 'php', 'phtml', 'phar', 'php3', 'php4', 'php5', 'php7', 'pht', 'htaccess', 'htpasswd', 'exe', 'dll', 'bat', 'cmd', 'com', 'msi', 'ps1', 'vbs', 'scr', 'sh', 'jar', 'svg', 'html', 'htm' );
@@ -118,13 +119,60 @@ class Unfold_Workflow {
 		return $author_id && user_can( $author_id, Unfold_Accounts::CAP_REVIEW );
 	}
 
+	public static function assigned_reviewer( $post_id ) {
+		return (int) get_post_meta( $post_id, self::META_REVIEWER, true );
+	}
+
+	public static function reviewer_name( $post_id ) {
+		$uid = self::assigned_reviewer( $post_id );
+		if ( ! $uid ) {
+			return '';
+		}
+		$u = get_userdata( $uid );
+		return $u ? ( $u->display_name ?: $u->user_login ) : '';
+	}
+
+	public static function set_reviewer( $post_id, $reviewer_id ) {
+		$reviewer_id = (int) $reviewer_id;
+		if ( $reviewer_id > 0 && ! user_can( $reviewer_id, Unfold_Accounts::CAP_REVIEW ) ) {
+			return new WP_Error( 'unfold_reviewer', __( 'Selected reviewer does not have instructor access.', 'unfold' ), array( 'status' => 400 ) );
+		}
+		if ( $reviewer_id > 0 ) {
+			update_post_meta( $post_id, self::META_REVIEWER, $reviewer_id );
+		} else {
+			delete_post_meta( $post_id, self::META_REVIEWER );
+		}
+		self::log( $post_id, 'assign', '', array( 'reviewer' => $reviewer_id ) );
+		return true;
+	}
+
+	/** Whether a user can review, edit during review, or moderate this project. */
+	public static function can_review( $post_id, $user_id = null ) {
+		$user_id = $user_id ? (int) $user_id : get_current_user_id();
+		if ( ! $user_id || ! user_can( $user_id, Unfold_Accounts::CAP_REVIEW ) ) {
+			return false;
+		}
+		if ( Unfold_Accounts::can_manage_roles( $user_id ) ) {
+			return true;
+		}
+		if ( self::is_owner( $post_id, $user_id ) ) {
+			return true;
+		}
+		// Peer instructors cannot moderate another instructor's project.
+		if ( self::author_is_reviewer( $post_id ) ) {
+			return false;
+		}
+		$assigned = self::assigned_reviewer( $post_id );
+		return $assigned ? ( $assigned === $user_id ) : true;
+	}
+
 	public static function can_view( $post_id ) {
 		return Unfold_Post_Type::TYPE === get_post_type( $post_id )
-			&& ( current_user_can( Unfold_Accounts::CAP_REVIEW ) || ( current_user_can( Unfold_Accounts::CAP_SUBMIT ) && self::is_owner( $post_id ) ) );
+			&& ( self::can_review( $post_id ) || ( current_user_can( Unfold_Accounts::CAP_SUBMIT ) && self::is_owner( $post_id ) ) );
 	}
 
 	public static function can_edit( $post_id ) {
-		if ( current_user_can( Unfold_Accounts::CAP_REVIEW ) ) {
+		if ( self::can_review( $post_id ) ) {
 			return true;
 		}
 		return self::can_view( $post_id ) && in_array( self::state( $post_id ), self::OWNER_EDITABLE, true );
@@ -738,7 +786,13 @@ class Unfold_Workflow {
 	 * Owner & instructor actions
 	 * ------------------------------------------------------------------ */
 
-	public static function submit( $post_id ) {
+	public static function submit( $post_id, $reviewer_id = null ) {
+		if ( null !== $reviewer_id ) {
+			$assigned = self::set_reviewer( $post_id, (int) $reviewer_id );
+			if ( is_wp_error( $assigned ) ) {
+				return $assigned;
+			}
+		}
 		$data = Unfold_Store::get( $post_id );
 		if ( ! $data ) {
 			$decoded = json_decode( Unfold_Store::get_raw( $post_id ), true );
@@ -765,6 +819,9 @@ class Unfold_Workflow {
 	}
 
 	public static function review( $post_id, $decision, $note ) {
+		if ( get_current_user_id() && ! self::can_review( $post_id ) ) {
+			return new WP_Error( 'unfold_forbidden', __( 'This project is assigned to another instructor.', 'unfold' ), array( 'status' => 403 ) );
+		}
 		$data = Unfold_Store::get( $post_id );
 		if ( ! $data ) {
 			$decoded = json_decode( Unfold_Store::get_raw( $post_id ), true );

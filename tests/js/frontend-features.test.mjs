@@ -216,14 +216,34 @@ test( 'Instructor decision form validates empty return note and posts approve de
 		note: noteInput,
 		getAttribute: () => '77',
 		querySelector: sel => ( sel === '.uf-decision-msg' ? msgEl : null ),
-		querySelectorAll: sel => ( sel.includes( 'decision' ) ? buttons : buttons ),
+		querySelectorAll: () => buttons,
 		addEventListener: ( ev, fn ) => { if ( ev === 'submit' ) submitHandler = fn; },
+	};
+	const assignMsg = { textContent: '' };
+	let assignSubmit = null;
+	const assignForm = {
+		reviewer_id: { value: '12' },
+		getAttribute: () => '77',
+		querySelector: sel => ( sel === '.uf-assign-msg' ? assignMsg : sel === 'button[type=submit]' ? { disabled: false } : null ),
+		addEventListener: ( ev, fn ) => { if ( ev === 'submit' ) assignSubmit = fn; },
+	};
+	const roleMsg = { textContent: '' };
+	let roleChange = null;
+	const roleSel = {
+		value: 'unfold_instructor',
+		disabled: false,
+		getAttribute: () => '15',
+		closest: () => ( { querySelector: () => roleMsg } ),
+		addEventListener: ( ev, fn ) => { if ( ev === 'change' ) roleChange = fn; },
 	};
 	const fetchCalls = [];
 	const code = fs.readFileSync( new URL( '../../wp-content/plugins/unfold/assets/js/instructor.js', import.meta.url ), 'utf8' );
 	vm.runInNewContext( code, {
 		window: { UNFOLD_PORTAL: { rest: 'http://localhost:8881/rest', nonce: 'n1' } },
-		document: { querySelector: sel => ( sel === '[data-uf-decision]' ? formEl : null ) },
+		document: {
+			querySelector: sel => ( sel === '[data-uf-decision]' ? formEl : sel === '[data-uf-assign]' ? assignForm : null ),
+			querySelectorAll: sel => ( sel === '[data-uf-role-select]' ? [ roleSel ] : [] ),
+		},
 		location: { reload() {} },
 		setTimeout,
 		fetch: async ( url, opts ) => {
@@ -245,4 +265,18 @@ test( 'Instructor decision form validates empty return note and posts approve de
 	assert.equal( fetchCalls.length, 1 );
 	assert.equal( fetchCalls[ 0 ].url, 'http://localhost:8881/rest/projects/77/review' );
 	assert.equal( JSON.parse( fetchCalls[ 0 ].opts.body ).decision, 'approve' );
+
+	// Lead Instructor reviewer reassignment posts to /projects/77/reviewer.
+	assert.ok( assignSubmit );
+	assignSubmit( { preventDefault() {} } );
+	await new Promise( r => setTimeout( r, 10 ) );
+	assert.equal( fetchCalls[ 1 ].url, 'http://localhost:8881/rest/projects/77/reviewer' );
+	assert.equal( JSON.parse( fetchCalls[ 1 ].opts.body ).reviewer_id, 12 );
+
+	// Team role delegation posts to /team/role.
+	assert.ok( roleChange );
+	roleChange();
+	await new Promise( r => setTimeout( r, 10 ) );
+	assert.equal( fetchCalls[ 2 ].url, 'http://localhost:8881/rest/team/role' );
+	assert.deepEqual( JSON.parse( fetchCalls[ 2 ].opts.body ), { user_id: 15, role: 'unfold_instructor' } );
 } );

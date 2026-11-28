@@ -18,6 +18,7 @@ class Unfold_Accounts {
 
 	const CAP_SUBMIT       = 'unfold_submit';
 	const CAP_REVIEW       = 'unfold_review';
+	const CAP_MANAGE_ROLES = 'unfold_manage_instructors';
 	const VERIFY_TTL       = 2 * DAY_IN_SECONDS;
 	const OTP_TTL          = 15 * MINUTE_IN_SECONDS;
 	const OTP_MAX_ATTEMPTS = 5;
@@ -93,14 +94,16 @@ class Unfold_Accounts {
 
 	/** Roles live in the database; reinstall when the plugin version changes. */
 	public static function maybe_install_roles() {
-		if ( get_option( 'unfold_roles_version' ) === UNFOLD_VERSION ) {
+		if ( get_option( 'unfold_roles_version' ) === UNFOLD_VERSION && get_role( 'unfold_lead_instructor' ) ) {
 			return;
 		}
 		$old = get_users( array( 'role' => 'unfold_student', 'fields' => 'ID' ) ); // Earlier name of the member role.
 		remove_role( 'unfold_member' );
 		remove_role( 'unfold_instructor' );
+		remove_role( 'unfold_lead_instructor' );
 		add_role( 'unfold_member', __( 'Member', 'unfold' ), array( 'read' => true, self::CAP_SUBMIT => true ) );
 		add_role( 'unfold_instructor', __( 'Instructor', 'unfold' ), array( 'read' => true, self::CAP_SUBMIT => true, self::CAP_REVIEW => true ) );
+		add_role( 'unfold_lead_instructor', __( 'Lead Instructor', 'unfold' ), array( 'read' => true, self::CAP_SUBMIT => true, self::CAP_REVIEW => true, self::CAP_MANAGE_ROLES => true ) );
 		foreach ( $old as $uid ) {
 			( new WP_User( $uid ) )->set_role( 'unfold_member' );
 		}
@@ -109,8 +112,144 @@ class Unfold_Accounts {
 		if ( $admin ) {
 			$admin->add_cap( self::CAP_SUBMIT );
 			$admin->add_cap( self::CAP_REVIEW );
+			$admin->add_cap( self::CAP_MANAGE_ROLES );
 		}
 		update_option( 'unfold_roles_version', UNFOLD_VERSION );
+	}
+
+	public static function can_manage_roles( $user = null ) {
+		if ( is_numeric( $user ) ) {
+			$user = get_userdata( (int) $user );
+		} elseif ( ! $user ) {
+			$user = wp_get_current_user();
+		}
+		return $user instanceof WP_User && $user->exists() && ( user_can( $user, self::CAP_MANAGE_ROLES ) || user_can( $user, 'manage_options' ) );
+	}
+
+	public static function role_key_for( $user ) {
+		if ( ! ( $user instanceof WP_User ) || ! $user->exists() ) {
+			return 'member';
+		}
+		if ( user_can( $user, 'manage_options' ) ) {
+			return 'admin';
+		}
+		if ( user_can( $user, self::CAP_MANAGE_ROLES ) ) {
+			return 'lead';
+		}
+		if ( user_can( $user, self::CAP_REVIEW ) ) {
+			return 'instructor';
+		}
+		return 'member';
+	}
+
+	/** Instructors eligible to receive student submissions for review. */
+	public static function reviewers() {
+		$users = get_users(
+			array(
+				'role__in' => array( 'unfold_lead_instructor', 'unfold_instructor', 'administrator' ),
+				'orderby'  => 'display_name',
+				'order'    => 'ASC',
+			)
+		);
+		$out   = array();
+		foreach ( $users as $u ) {
+			if ( ! user_can( $u, self::CAP_REVIEW ) ) {
+				continue;
+			}
+			$out[] = array(
+				'id'      => (int) $u->ID,
+				'name'    => $u->display_name ?: $u->user_login,
+				'role'    => self::role_key_for( $u ),
+				'is_lead' => self::can_manage_roles( $u ),
+			);
+		}
+		usort(
+			$out,
+			static function ( $a, $b ) {
+				$rank = array( 'lead' => 0, 'instructor' => 1, 'admin' => 2 );
+				$ra   = $rank[ $a['role'] ] ?? 3;
+				$rb   = $rank[ $b['role'] ] ?? 3;
+				return $ra !== $rb ? ( $ra <=> $rb ) : strcasecmp( $a['name'], $b['name'] );
+			}
+		);
+		return $out;
+	}
+
+	/** Non-admin portal accounts shown in Lead Instructor's Team & Roles tab. */
+	public static function portal_users() {
+		$users = get_users(
+			array(
+				'role__in' => array( 'unfold_lead_instructor', 'unfold_instructor', 'unfold_member' ),
+				'orderby'  => 'display_name',
+				'order'    => 'ASC',
+			)
+		);
+		$me    = get_current_user_id();
+		$out   = array();
+		foreach ( $users as $u ) {
+			if ( user_can( $u, 'manage_options' ) ) {
+				continue;
+			}
+			$out[] = array(
+				'id'       => (int) $u->ID,
+				'name'     => $u->display_name ?: $u->user_login,
+				'email'    => (string) $u->user_email,
+				'role'     => self::role_key_for( $u ),
+				'wp_role'  => $u->roles[0] ?? 'unfold_member',
+				'verified' => ! self::is_unverified( $u->ID ),
+				'is_self'  => (int) $u->ID === (int) $me,
+			);
+		}
+		usort(
+			$out,
+			static function ( $a, $b ) {
+				$rank = array( 'lead' => 0, 'instructor' => 1, 'member' => 2 );
+				$ra   = $rank[ $a['role'] ] ?? 3;
+				$rb   = $rank[ $b['role'] ] ?? 3;
+				return $ra !== $rb ? ( $ra <=> $rb ) : strcasecmp( $a['name'], $b['name'] );
+			}
+		);
+		return $out;
+	}
+
+	/** Grant or revoke instructor/lead roles from the portal (Lead Instructor or Admin only). */
+	public static function set_portal_role( $actor_id, $target_user_id, $new_role ) {
+		self::maybe_install_roles();
+		$actor_id       = (int) $actor_id;
+		$target_user_id = (int) $target_user_id;
+		if ( ! self::can_manage_roles( $actor_id ) ) {
+			return new WP_Error( 'unfold_forbidden', __( 'Only a Lead Instructor or administrator can manage instructor roles.', 'unfold' ), array( 'status' => 403 ) );
+		}
+		if ( $target_user_id <= 0 || $target_user_id === $actor_id ) {
+			return new WP_Error( 'unfold_invalid_user', __( 'Choose another member account to update.', 'unfold' ), array( 'status' => 400 ) );
+		}
+		$target = get_userdata( $target_user_id );
+		if ( ! ( $target instanceof WP_User ) || ! $target->exists() ) {
+			return new WP_Error( 'unfold_missing_user', __( 'User not found.', 'unfold' ), array( 'status' => 404 ) );
+		}
+		if ( user_can( $target, 'manage_options' ) ) {
+			return new WP_Error( 'unfold_protected', __( 'Site administrators can only be changed in wp-admin.', 'unfold' ), array( 'status' => 403 ) );
+		}
+		$is_admin = user_can( $actor_id, 'manage_options' );
+		if ( user_can( $target, self::CAP_MANAGE_ROLES ) && ! $is_admin ) {
+			return new WP_Error( 'unfold_protected', __( 'Only a site administrator can change a Lead Instructor.', 'unfold' ), array( 'status' => 403 ) );
+		}
+		$allowed = $is_admin
+			? array( 'unfold_member', 'unfold_instructor', 'unfold_lead_instructor' )
+			: array( 'unfold_member', 'unfold_instructor' );
+		if ( ! in_array( $new_role, $allowed, true ) ) {
+			return new WP_Error( 'unfold_role', __( 'Invalid role choice.', 'unfold' ), array( 'status' => 400 ) );
+		}
+		if ( 'unfold_member' !== $new_role && self::is_unverified( $target_user_id ) ) {
+			return new WP_Error( 'unfold_unverified', __( 'Verify this account email before granting instructor access.', 'unfold' ), array( 'status' => 400 ) );
+		}
+		$target->set_role( $new_role );
+		return array(
+			'id'      => (int) $target->ID,
+			'name'    => $target->display_name ?: $target->user_login,
+			'role'    => self::role_key_for( $target ),
+			'wp_role' => $new_role,
+		);
 	}
 
 	public static function is_portal_only_user( $user = null ) {

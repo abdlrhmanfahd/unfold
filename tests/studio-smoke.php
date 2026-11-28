@@ -43,6 +43,7 @@ do_shortcode( '[unfold_facts]' );
 
 // Full project lifecycle integration test (cleaned up in finally).
 require_once ABSPATH . 'wp-admin/includes/user.php';
+Unfold_Accounts::maybe_install_roles();
 $fixture_raw  = file_get_contents( __DIR__ . '/fixtures/valid-project.json' );
 $fixture_data = json_decode( $fixture_raw, true );
 $student_id   = wp_insert_user(
@@ -50,13 +51,38 @@ $student_id   = wp_insert_user(
 		'user_login' => 'smoke_student_' . wp_generate_password( 6, false ),
 		'user_pass'  => wp_generate_password( 12 ),
 		'user_email' => 'smoke_' . wp_generate_password( 6, false ) . '@example.com',
-		'role'       => 'unfold_student',
+		'role'       => 'unfold_member',
 	)
 );
-if ( is_wp_error( $student_id ) || ! $student_id ) {
-	fwrite( STDERR, "FAIL: Could not create temporary smoke student user.\n" );
+$lead_id      = wp_insert_user(
+	array(
+		'user_login' => 'smoke_lead_' . wp_generate_password( 6, false ),
+		'user_pass'  => wp_generate_password( 12 ),
+		'user_email' => 'smoke_lead_' . wp_generate_password( 6, false ) . '@example.com',
+		'role'       => 'unfold_lead_instructor',
+	)
+);
+$inst_a_id    = wp_insert_user(
+	array(
+		'user_login' => 'smoke_inst_a_' . wp_generate_password( 6, false ),
+		'user_pass'  => wp_generate_password( 12 ),
+		'user_email' => 'smoke_insta_' . wp_generate_password( 6, false ) . '@example.com',
+		'role'       => 'unfold_instructor',
+	)
+);
+$inst_b_id    = wp_insert_user(
+	array(
+		'user_login' => 'smoke_inst_b_' . wp_generate_password( 6, false ),
+		'user_pass'  => wp_generate_password( 12 ),
+		'user_email' => 'smoke_instb_' . wp_generate_password( 6, false ) . '@example.com',
+		'role'       => 'unfold_instructor',
+	)
+);
+if ( is_wp_error( $student_id ) || ! $student_id || is_wp_error( $lead_id ) || ! $lead_id || is_wp_error( $inst_a_id ) || ! $inst_a_id || is_wp_error( $inst_b_id ) || ! $inst_b_id ) {
+	fwrite( STDERR, "FAIL: Could not create temporary smoke users.\n" );
 	exit( 1 );
 }
+update_user_meta( $student_id, 'unfold_email_verified', '1' );
 $tmp_id = wp_insert_post(
 	array(
 		'post_type'   => Unfold_Post_Type::TYPE,
@@ -70,7 +96,7 @@ $inst_tmp_id = wp_insert_post(
 		'post_type'   => Unfold_Post_Type::TYPE,
 		'post_status' => 'draft',
 		'post_title'  => 'Smoke Instructor Project',
-		'post_author' => 1,
+		'post_author' => $inst_a_id,
 	)
 );
 if ( is_wp_error( $tmp_id ) || ! $tmp_id || is_wp_error( $inst_tmp_id ) || ! $inst_tmp_id ) {
@@ -128,8 +154,43 @@ try {
 	if ( 'review' !== Unfold_Workflow::state( $tmp_id ) ) {
 		throw new RuntimeException( 'Expected state review after complete_job.' );
 	}
-	if ( true !== Unfold_Workflow::submit( $tmp_id ) || 'submitted' !== Unfold_Workflow::state( $tmp_id ) ) {
+	if ( true !== Unfold_Workflow::submit( $tmp_id, $inst_a_id ) || 'submitted' !== Unfold_Workflow::state( $tmp_id ) ) {
 		throw new RuntimeException( 'Expected student project submit to enter submitted state.' );
+	}
+	if ( ! Unfold_Workflow::can_review( $tmp_id, $inst_a_id ) || Unfold_Workflow::can_review( $tmp_id, $inst_b_id ) || ! Unfold_Workflow::can_review( $tmp_id, $lead_id ) ) {
+		throw new RuntimeException( 'Expected assigned reviewer scoping to allow assigned/lead and block peer instructor.' );
+	}
+
+	// Regular instructor B cannot see or approve student project assigned to instructor A.
+	wp_set_current_user( $inst_b_id );
+	$b_overview = Unfold_Stats::overview();
+	if ( in_array( $tmp_id, wp_list_pluck( $b_overview['queue'], 'id' ), true ) ) {
+		throw new RuntimeException( 'Expected peer instructor queue to exclude submissions assigned to another instructor.' );
+	}
+	if ( ! is_wp_error( Unfold_Workflow::review( $tmp_id, 'approve', 'Unauthorized' ) ) ) {
+		throw new RuntimeException( 'Expected peer instructor approval on another instructor submission to error.' );
+	}
+
+	// Role delegation checks: regular instructor blocked; Lead Instructor can promote & demote verified member.
+	if ( ! is_wp_error( Unfold_Accounts::set_portal_role( $inst_a_id, $student_id, 'unfold_instructor' ) ) ) {
+		throw new RuntimeException( 'Expected regular instructor role grant to be rejected.' );
+	}
+	$promoted = Unfold_Accounts::set_portal_role( $lead_id, $student_id, 'unfold_instructor' );
+	if ( is_wp_error( $promoted ) || 'instructor' !== ( $promoted['role'] ?? '' ) ) {
+		throw new RuntimeException( 'Expected Lead Instructor to grant instructor role to verified member.' );
+	}
+	if ( ! is_wp_error( Unfold_Accounts::set_portal_role( $lead_id, $student_id, 'unfold_lead_instructor' ) ) ) {
+		throw new RuntimeException( 'Expected non-admin Lead Instructor to be blocked from creating another Lead Instructor.' );
+	}
+	$demoted = Unfold_Accounts::set_portal_role( $lead_id, $student_id, 'unfold_member' );
+	if ( is_wp_error( $demoted ) || 'member' !== ( $demoted['role'] ?? '' ) ) {
+		throw new RuntimeException( 'Expected Lead Instructor to revert role back to member.' );
+	}
+
+	wp_set_current_user( $inst_a_id );
+	$a_overview = Unfold_Stats::overview();
+	if ( ! in_array( $tmp_id, wp_list_pluck( $a_overview['queue'], 'id' ), true ) ) {
+		throw new RuntimeException( 'Expected assigned instructor queue to include assigned submission.' );
 	}
 	$empty_changes = Unfold_Workflow::review( $tmp_id, 'changes', '   ' );
 	if ( ! is_wp_error( $empty_changes ) ) {
@@ -140,6 +201,7 @@ try {
 	}
 
 	// Instructor-authored projects must skip pending instructor review and publish directly.
+	wp_set_current_user( $inst_a_id );
 	Unfold_Workflow::queue_extraction( $inst_tmp_id );
 	Unfold_Workflow::complete_job( $inst_tmp_id, $soft_data, array( 'model' => 'smoke-test', 'usage' => array( 'output_tokens' => 42 ) ) );
 	$inst_payload = Unfold_Rest::project_payload( $inst_tmp_id );
@@ -149,15 +211,23 @@ try {
 	if ( true !== Unfold_Workflow::submit( $inst_tmp_id ) || 'approved' !== Unfold_Workflow::state( $inst_tmp_id ) || 'publish' !== get_post_status( $inst_tmp_id ) ) {
 		throw new RuntimeException( 'Expected instructor-authored project to publish directly without pending instructor review.' );
 	}
+	if ( Unfold_Workflow::can_review( $inst_tmp_id, $inst_b_id ) ) {
+		throw new RuntimeException( 'Expected peer instructor to be blocked from moderating another instructor upload.' );
+	}
+	wp_set_current_user( 0 );
 
 	$html = Unfold_Render::project_html( $tmp_id, Unfold_Store::get( $tmp_id ), false );
 	if ( false === strpos( $html, 'Autonomous Warehouse Fleet Management' ) ) {
 		throw new RuntimeException( 'Expected rendered project HTML to include title.' );
 	}
 } finally {
+	wp_set_current_user( 0 );
 	wp_delete_post( $tmp_id, true );
 	wp_delete_post( $inst_tmp_id, true );
 	wp_delete_user( $student_id );
+	wp_delete_user( $lead_id );
+	wp_delete_user( $inst_a_id );
+	wp_delete_user( $inst_b_id );
 }
 
 echo "OK: Unfold Studio smoke test passed.\n";

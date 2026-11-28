@@ -393,7 +393,8 @@
 				+ '<div class="uf-ai-box" data-uf-ai></div>'
 				+ '<p class="uf-actions"><button class="uf-btn" data-uf-retry>Try again</button></p></div></div>';
 		} else if ( s === 'submitted' ) {
-			html += '<div class="uf-state-card"><div><h2 class="uf-h3">Submitted — waiting for your instructor</h2><p>You will see the decision here. The project cannot be edited while it is being reviewed.</p><p class="uf-actions"><a class="uf-btn uf-btn--ghost" href="' + previewUrl() + '">Preview the page</a></p></div></div>';
+			var revLabel = P.reviewer_name ? ( 'Submitted — waiting for ' + esc( P.reviewer_name ) ) : 'Submitted — waiting for your instructor';
+			html += '<div class="uf-state-card"><div><h2 class="uf-h3">' + revLabel + '</h2><p>You will see the decision here. The project cannot be edited while it is being reviewed.</p><p class="uf-actions"><a class="uf-btn uf-btn--ghost" href="' + previewUrl() + '">Preview the page</a></p></div></div>';
 		} else if ( s === 'approved' ) {
 			html += '<div class="uf-state-card uf-state-card--ok"><div><h2 class="uf-h3">Published</h2><p>Your project is live on the site.</p><p class="uf-actions"><a class="uf-btn" href="' + esc( P.url ) + '">View the live page</a></p></div></div>';
 		}
@@ -404,12 +405,22 @@
 
 		var editing = ( s === 'review' || s === 'changes' ) && P.editable;
 		if ( editing ) {
+			var revPick = '';
+			if ( ! direct && Array.isArray( P.reviewers ) && P.reviewers.length ) {
+				revPick = '<label class="uf-reviewer-pick"><span>Instructor</span><select data-uf-reviewer>'
+					+ '<option value="0">Lead / Any available instructor</option>'
+					+ P.reviewers.map( function ( r ) {
+						return '<option value="' + esc( r.id ) + '"' + ( +P.reviewer_id === +r.id ? ' selected' : '' ) + '>' + esc( r.name + ( r.is_lead ? ' (Lead)' : '' ) ) + '</option>';
+					} ).join( '' )
+					+ '</select></label>';
+			}
 			html += '<div class="uf-editor-intro"><div><h2 class="uf-h3">Check what Unfold found</h2><p class="uf-muted">Everything below was read from your report. Fix anything wrong, fill in what is missing, and mark each number <strong>✓ Confirmed</strong> once you have checked it. Values that do not exist in your project can be marked <em>Doesn’t apply</em>. Never guess a number.</p>' + filesLine + '</div>'
 				+ '<div class="uf-editor-meter" data-uf-meter></div></div>'
 				+ '<div class="uf-errors" data-uf-errors></div>'
 				+ mediaNotes()
 				+ '<div class="uf-form-host" data-uf-form></div>'
 				+ '<div class="uf-savebar" role="region" aria-label="Save and submit"><span class="uf-save-status" data-uf-save-status aria-live="polite"></span>'
+				+ revPick
 				+ '<a class="uf-btn uf-btn--ghost" href="' + previewUrl() + '" data-uf-preview>Preview</a>'
 				+ '<button class="uf-btn uf-btn--ghost" data-uf-save>Save</button>'
 				+ '<button class="uf-btn" data-uf-submit>' + ( direct ? 'Publish' : 'Submit for review' ) + '</button></div>';
@@ -513,7 +524,9 @@
 			var sims = ( ( form.getData() || {} ).subsystems || [] ).filter( function ( s ) { return s.sim && s.sim.template && s.sim.student_approved; } ).length;
 			if ( sims ) msg += ' ' + sims + ' simulation' + ( sims > 1 ? 's are' : ' is' ) + ' marked as checked and will be shown to visitors; make sure you tried ' + ( sims > 1 ? 'them' : 'it' ) + '.';
 			confirmBox( msg, function () {
-				api( 'POST', '/projects/' + C.project + '/submit' ).then( function ( p ) { P = p; render(); window.scrollTo( { top: 0, behavior: 'smooth' } ); } ).catch( function ( e ) { status( e.message ); } );
+				var revSel = ws.querySelector( '[data-uf-reviewer]' );
+				var payload = revSel ? { reviewer_id: +revSel.value || 0 } : undefined;
+				api( 'POST', '/projects/' + C.project + '/submit', payload ).then( function ( p ) { P = p; render(); window.scrollTo( { top: 0, behavior: 'smooth' } ); } ).catch( function ( e ) { status( e.message ); } );
 			}, direct ? 'Publish' : 'Submit' );
 		} ).catch( function () {} );
 	}
