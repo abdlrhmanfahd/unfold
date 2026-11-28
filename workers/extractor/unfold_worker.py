@@ -1879,7 +1879,13 @@ def generate_cover_image(client: LLMClient, data: dict) -> tuple[bytes, str, str
     if client.provider == "gemini":
         key = client.api_key or os.environ.get("GEMINI_API_KEY") or read_secret_file("gemini-key.txt")
         if key:
-            for img_model in GEMINI_IMAGE_MODELS:
+            candidate_models: list[str] = []
+            if client.model:
+                candidate_models.append(client.model)
+            for m in GEMINI_IMAGE_MODELS:
+                if m not in candidate_models:
+                    candidate_models.append(m)
+            for img_model in candidate_models:
                 try:
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{img_model}:generateContent"
                     r = requests.post(
