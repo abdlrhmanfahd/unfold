@@ -34,7 +34,20 @@
 			} ),
 		};
 	}
-	window.UnfoldPortalHelpers = { formatExtractProgress: formatExtractProgress };
+	function esc( s ) { return String( s == null ? '' : s ).replace( /[&<>"']/g, function ( c ) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ c ]; } ); }
+	var STEPS = [ [ 'upload', 'Upload' ], [ 'read', 'AI reads your files' ], [ 'review', 'You review' ], [ 'submit', 'Instructor review' ], [ 'live', 'Published' ] ];
+	var DIRECT_STEPS = [ [ 'upload', 'Upload' ], [ 'read', 'AI reads your files' ], [ 'review', 'You review' ], [ 'live', 'Published' ] ];
+	var STEP_OF = { queued: 1, extracting: 1, failed: 1, review: 2, changes: 2, submitted: 3, approved: 4 };
+
+	function stepper( state, directPublish ) {
+		var steps = directPublish ? DIRECT_STEPS : STEPS;
+		var cur = directPublish && state === 'approved' ? 3 : STEP_OF[ state ];
+		return '<ol class="uf-steps">' + steps.map( function ( s, i ) {
+			var cls = i < cur ? 'is-done' : i === cur ? 'is-current' + ( state === 'failed' || state === 'changes' ? ' is-alert' : '' ) : '';
+			return '<li class="' + cls + '"' + ( i === cur ? ' aria-current="step"' : '' ) + '><span class="uf-step-dot">' + ( i < cur ? '✓' : i + 1 ) + '</span><span>' + esc( s[ 1 ] ) + '</span></li>';
+		} ).join( '' ) + '</ol>';
+	}
+	window.UnfoldPortalHelpers = { formatExtractProgress: formatExtractProgress, stepper: stepper };
 
 	var C = window.UNFOLD_PORTAL;
 	if ( ! C ) return;
@@ -53,7 +66,6 @@
 		} );
 	}
 	function h( html ) { var d = document.createElement( 'div' ); d.innerHTML = html; return d.firstElementChild; }
-	function esc( s ) { return String( s == null ? '' : s ).replace( /[&<>"']/g, function ( c ) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ c ]; } ); }
 	function mb( n ) { return ( n / 1048576 ).toFixed( n > 104857600 ? 0 : 1 ) + ' MB'; }
 
 	function mountAi( host ) {
@@ -333,16 +345,6 @@
 	if ( ! ws || ! C.project ) return;
 
 	var P = null, form = null, dirty = false, dirtyWhileSaving = false, saving = null, pollT = null, saveT = null;
-	var STEPS = [ [ 'upload', 'Upload' ], [ 'read', 'AI reads your files' ], [ 'review', 'You review' ], [ 'submit', 'Instructor review' ], [ 'live', 'Published' ] ];
-	var STEP_OF = { queued: 1, extracting: 1, failed: 1, review: 2, changes: 2, submitted: 3, approved: 4 };
-
-	function stepper( state ) {
-		var cur = STEP_OF[ state ];
-		return '<ol class="uf-steps">' + STEPS.map( function ( s, i ) {
-			var cls = i < cur ? 'is-done' : i === cur ? 'is-current' + ( state === 'failed' || state === 'changes' ? ' is-alert' : '' ) : '';
-			return '<li class="' + cls + '"' + ( i === cur ? ' aria-current="step"' : '' ) + '><span class="uf-step-dot">' + ( i < cur ? '✓' : i + 1 ) + '</span><span>' + esc( s[ 1 ] ) + '</span></li>';
-		} ).join( '' ) + '</ol>';
-	}
 
 	function load() { return api( 'GET', '/projects/' + C.project ).then( function ( p ) { P = p; render(); } ); }
 
@@ -360,7 +362,7 @@
 
 	function render() {
 		clearTimeout( pollT );
-		var s = P.state, html = stepper( s );
+		var s = P.state, direct = !! P.direct_publish, html = stepper( s, direct );
 		var totals = P.manifest.totals || {}, filesLine = P.zip ? '<p class="uf-muted">' + esc( P.zip ) + ' · ' + P.manifest.count + ' files (' + Object.keys( totals ).map( function ( k ) { return totals[ k ] + ' ' + k; } ).join( ', ' ) + ')</p>' : '';
 
 		if ( s === 'queued' || s === 'extracting' ) {
@@ -410,7 +412,7 @@
 				+ '<div class="uf-savebar" role="region" aria-label="Save and submit"><span class="uf-save-status" data-uf-save-status aria-live="polite"></span>'
 				+ '<a class="uf-btn uf-btn--ghost" href="' + previewUrl() + '" data-uf-preview>Preview</a>'
 				+ '<button class="uf-btn uf-btn--ghost" data-uf-save>Save</button>'
-				+ '<button class="uf-btn" data-uf-submit>Submit for review</button></div>';
+				+ '<button class="uf-btn" data-uf-submit>' + ( direct ? 'Publish' : 'Submit for review' ) + '</button></div>';
 		}
 		ws.innerHTML = html;
 
@@ -462,7 +464,7 @@
 		var box = ws.querySelector( '[data-uf-errors]' );
 		if ( ! box ) return;
 		if ( ! errors || ! errors.length ) { box.innerHTML = ''; return; }
-		box.innerHTML = '<div class="uf-alert uf-alert--warn" role="status"><strong>' + errors.length + ( errors.length === 1 ? ' note to review' : ' notes to review' ) + ' (you can still submit):</strong><ul>' + errors.slice( 0, 30 ).map( function ( e ) {
+		box.innerHTML = '<div class="uf-alert uf-alert--warn" role="status"><strong>' + errors.length + ( errors.length === 1 ? ' note to review' : ' notes to review' ) + ( P && P.direct_publish ? ' (you can still publish):</strong><ul>' : ' (you can still submit):</strong><ul>' ) + errors.slice( 0, 30 ).map( function ( e ) {
 			var i = e.indexOf( ': ' ), path = i > 0 ? e.slice( 0, i ) : '', msg = i > 0 ? e.slice( i + 2 ) : e;
 			return '<li>' + ( path && path !== '(top level)' ? '<button type="button" class="uf-linkbtn" data-path="' + esc( path ) + '">' + esc( pretty( path ) ) + '</button> — ' : '' ) + esc( msg ) + '</li>';
 		} ).join( '' ) + '</ul></div>';
@@ -502,23 +504,26 @@
 
 	function submit() {
 		save().then( function () {
-			var c = form.counts();
+			var c = form.counts(), direct = !! P.direct_publish;
 			var prefix = ( P.errors && P.errors.length ) ? ( P.errors.length === 1 ? 'There is 1 review note above. ' : 'There are ' + P.errors.length + ' review notes above. ' ) : '';
-			var msg = prefix + ( c.tracked - c.confirmed > 0 ? ( c.tracked - c.confirmed ) + ' values are not marked as checked yet. Submit anyway? Unchecked values are shown to visitors with an "unconfirmed" marker.' : 'Submit this project for review? You cannot edit it while it is being reviewed.' );
+			var actionMsg = direct
+				? ( c.tracked - c.confirmed > 0 ? ( c.tracked - c.confirmed ) + ' values are not marked as checked yet. Publish anyway? Unchecked values are shown to visitors with an "unconfirmed" marker.' : 'Publish this project live on the site?' )
+				: ( c.tracked - c.confirmed > 0 ? ( c.tracked - c.confirmed ) + ' values are not marked as checked yet. Submit anyway? Unchecked values are shown to visitors with an "unconfirmed" marker.' : 'Submit this project for review? You cannot edit it while it is being reviewed.' );
+			var msg = prefix + actionMsg;
 			var sims = ( ( form.getData() || {} ).subsystems || [] ).filter( function ( s ) { return s.sim && s.sim.template && s.sim.student_approved; } ).length;
 			if ( sims ) msg += ' ' + sims + ' simulation' + ( sims > 1 ? 's are' : ' is' ) + ' marked as checked and will be shown to visitors; make sure you tried ' + ( sims > 1 ? 'them' : 'it' ) + '.';
 			confirmBox( msg, function () {
 				api( 'POST', '/projects/' + C.project + '/submit' ).then( function ( p ) { P = p; render(); window.scrollTo( { top: 0, behavior: 'smooth' } ); } ).catch( function ( e ) { status( e.message ); } );
-			} );
+			}, direct ? 'Publish' : 'Submit' );
 		} ).catch( function () {} );
 	}
 
 	// In-page confirmation (no browser dialogs).
-	function confirmBox( msg, ok ) {
+	function confirmBox( msg, ok, yesLabel ) {
 		var old = ws.querySelector( '.uf-confirm' );
 		if ( old ) old.remove();
 		var bar = ws.querySelector( '.uf-savebar' );
-		var box = h( '<div class="uf-confirm" role="alertdialog" aria-live="assertive"><p>' + esc( msg ) + '</p><p class="uf-actions"><button class="uf-btn" data-yes>Submit</button> <button class="uf-btn uf-btn--ghost" data-no>Keep editing</button></p></div>' );
+		var box = h( '<div class="uf-confirm" role="alertdialog" aria-live="assertive"><p>' + esc( msg ) + '</p><p class="uf-actions"><button class="uf-btn" data-yes>' + esc( yesLabel || 'Submit' ) + '</button> <button class="uf-btn uf-btn--ghost" data-no>Keep editing</button></p></div>' );
 		bar.parentNode.insertBefore( box, bar );
 		box.querySelector( '[data-yes]' ).focus();
 		box.querySelector( '[data-yes]' ).addEventListener( 'click', function () { box.remove(); ok(); } );

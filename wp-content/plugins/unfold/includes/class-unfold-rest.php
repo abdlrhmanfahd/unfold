@@ -145,6 +145,7 @@ class Unfold_Rest {
 			'now'        => time(),
 			'typical_s'  => Unfold_Workflow::typical_read_seconds(),
 			'editable'   => Unfold_Workflow::can_edit( $id ),
+			'direct_publish' => Unfold_Workflow::author_is_reviewer( $id ) || current_user_can( Unfold_Accounts::CAP_REVIEW ),
 			'data'       => is_array( $data ) ? $data : null,
 			'errors'     => Unfold_Store::get_errors( $id ),
 			'valid'      => (bool) Unfold_Store::get( $id ) && ! Unfold_Store::get_errors( $id ),

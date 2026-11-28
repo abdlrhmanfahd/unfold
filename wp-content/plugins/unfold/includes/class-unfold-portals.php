@@ -191,7 +191,7 @@ class Unfold_Portals {
 			'queued'     => $reading,
 			'extracting' => $reading,
 			'failed'     => __( 'Reading the files failed. Open the project to try again.', 'unfold' ),
-			'review'     => __( 'Check what Unfold found, then submit.', 'unfold' ),
+			'review'     => current_user_can( Unfold_Accounts::CAP_REVIEW ) ? __( 'Check what Unfold found, then publish.', 'unfold' ) : __( 'Check what Unfold found, then submit.', 'unfold' ),
 			'submitted'  => __( 'Waiting for the instructor.', 'unfold' ),
 			'changes'    => __( 'The instructor returned it with notes.', 'unfold' ),
 			'approved'   => __( 'Live on the site.', 'unfold' ),

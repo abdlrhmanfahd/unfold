@@ -324,12 +324,53 @@ class ExtractorWorkerTests(unittest.TestCase):
         bad_resp = mock.Mock()
         bad_resp.ok = False
         bad_resp.status_code = 400
-        with mock.patch.object(uw.requests, "post", side_effect=[bad_resp, ok_resp]) as post_mock:
-            client = uw.LLMClient("gemini", model="gemini-2.5-flash", api_key="demo-gemini-value-1")
-            res = uw.generate_cover_image(client, {"meta": {"title": "Safe Stopping", "short_description": "LiDAR obstacle avoidance"}})
-            self.assertIsNotNone(res)
-            self.assertIn("gemini-2.5-flash:generateContent", post_mock.call_args_list[0].args[0])
-            self.assertIn("gemini-2.5-flash-image:generateContent", post_mock.call_args_list[1].args[0])
+        with mock.patch.dict(os.environ, {"UNFOLD_IMAGE_FALLBACK": "0"}):
+            with mock.patch.object(uw.requests, "post", side_effect=[bad_resp, ok_resp]) as post_mock:
+                client = uw.LLMClient("gemini", model="gemini-2.5-flash", api_key="demo-gemini-value-1")
+                res = uw.generate_cover_image(client, {"meta": {"title": "Safe Stopping", "short_description": "LiDAR obstacle avoidance"}})
+                self.assertIsNotNone(res)
+                self.assertIn("gemini-2.5-flash:generateContent", post_mock.call_args_list[0].args[0])
+                self.assertIn("gemini-2.5-flash-image:generateContent", post_mock.call_args_list[1].args[0])
+
+    def test_generate_cover_image_falls_back_to_pollinations_when_gemini_blocked(self):
+        geo_err = mock.Mock(ok=False, status_code=400, text='{"error":{"message":"Image generation is not available in your country."}}')
+        quota_err = mock.Mock(ok=False, status_code=429, text='{"error":{"message":"You exceeded your current quota"}}')
+        not_found = mock.Mock(ok=False, status_code=404, text='{"error":{"message":"not found"}}')
+        fb_png = b"\x89PNG\r\n\x1a\n" + b"2" * 2048
+        fb_ok = mock.Mock(ok=True, status_code=200, headers={"Content-Type": "image/jpeg"}, content=fb_png)
+
+        proj = {
+            "meta": {
+                "title": "Stop Release During Repeated Crossing Movements",
+                "short_description": "This project tests whether requiring 1.0 s of continuous clear LiDAR observation compared with baseline improves safety.",
+            },
+            "subsystems": [
+                {"name": "LiDAR Detector"},
+                {"name": "Stop Logic"},
+                {"name": "Main Study"},
+            ],
+        }
+        clean_prompt = uw.build_cover_prompt(proj)
+        self.assertIn("featuring LiDAR Detector, Stop Logic", clean_prompt)
+        self.assertNotIn("Main Study", clean_prompt)
+        self.assertNotIn("compared with", clean_prompt)
+        self.assertIn("No text, no words, no numbers, no letters.", clean_prompt)
+
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("UNFOLD_IMAGE_FALLBACK", None)
+            with mock.patch.object(uw.requests, "post", side_effect=[geo_err, quota_err, quota_err, not_found, not_found]):
+                with mock.patch.object(uw.requests, "get", return_value=fb_ok) as get_mock:
+                    with mock.patch.object(uw.time, "sleep"):
+                        res = uw.generate_cover_image(uw.LLMClient("gemini", model="gemini-4-hydrogen", api_key="k1"), proj)
+                        self.assertIsNotNone(res)
+                        self.assertEqual(res[0], fb_png)
+                        self.assertIn("image.pollinations.ai/prompt/", get_mock.call_args.args[0])
+
+            with mock.patch.dict(os.environ, {"UNFOLD_IMAGE_FALLBACK": "0"}):
+                with mock.patch.object(uw.requests, "post", side_effect=[geo_err, quota_err, quota_err, not_found, not_found]):
+                    with mock.patch.object(uw.requests, "get") as get_mock:
+                        self.assertIsNone(uw.generate_cover_image(uw.LLMClient("gemini", model="gemini-4-hydrogen", api_key="k1"), proj))
+                        get_mock.assert_not_called()
 
     def test_build_context_includes_extra_docs_md_csv_stats_and_deep_code(self):
         docx_buf = io.BytesIO()

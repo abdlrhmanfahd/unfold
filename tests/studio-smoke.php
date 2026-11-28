@@ -42,17 +42,39 @@ do_shortcode( '[unfold_featured]' );
 do_shortcode( '[unfold_facts]' );
 
 // Full project lifecycle integration test (cleaned up in finally).
+require_once ABSPATH . 'wp-admin/includes/user.php';
 $fixture_raw  = file_get_contents( __DIR__ . '/fixtures/valid-project.json' );
 $fixture_data = json_decode( $fixture_raw, true );
-$tmp_id       = wp_insert_post(
+$student_id   = wp_insert_user(
+	array(
+		'user_login' => 'smoke_student_' . wp_generate_password( 6, false ),
+		'user_pass'  => wp_generate_password( 12 ),
+		'user_email' => 'smoke_' . wp_generate_password( 6, false ) . '@example.com',
+		'role'       => 'unfold_student',
+	)
+);
+if ( is_wp_error( $student_id ) || ! $student_id ) {
+	fwrite( STDERR, "FAIL: Could not create temporary smoke student user.\n" );
+	exit( 1 );
+}
+$tmp_id = wp_insert_post(
 	array(
 		'post_type'   => Unfold_Post_Type::TYPE,
 		'post_status' => 'draft',
 		'post_title'  => 'Smoke Integration Project',
+		'post_author' => $student_id,
+	)
+);
+$inst_tmp_id = wp_insert_post(
+	array(
+		'post_type'   => Unfold_Post_Type::TYPE,
+		'post_status' => 'draft',
+		'post_title'  => 'Smoke Instructor Project',
 		'post_author' => 1,
 	)
 );
-if ( is_wp_error( $tmp_id ) || ! $tmp_id ) {
+if ( is_wp_error( $tmp_id ) || ! $tmp_id || is_wp_error( $inst_tmp_id ) || ! $inst_tmp_id ) {
+	wp_delete_user( $student_id );
 	fwrite( STDERR, "FAIL: Could not create temporary integration post.\n" );
 	exit( 1 );
 }
@@ -107,7 +129,7 @@ try {
 		throw new RuntimeException( 'Expected state review after complete_job.' );
 	}
 	if ( true !== Unfold_Workflow::submit( $tmp_id ) || 'submitted' !== Unfold_Workflow::state( $tmp_id ) ) {
-		throw new RuntimeException( 'Expected non-blocking submit to succeed.' );
+		throw new RuntimeException( 'Expected student project submit to enter submitted state.' );
 	}
 	$empty_changes = Unfold_Workflow::review( $tmp_id, 'changes', '   ' );
 	if ( ! is_wp_error( $empty_changes ) ) {
@@ -116,12 +138,26 @@ try {
 	if ( true !== Unfold_Workflow::review( $tmp_id, 'approve', 'Smoke approved' ) || 'approved' !== Unfold_Workflow::state( $tmp_id ) ) {
 		throw new RuntimeException( 'Expected non-blocking publish approval to succeed.' );
 	}
+
+	// Instructor-authored projects must skip pending instructor review and publish directly.
+	Unfold_Workflow::queue_extraction( $inst_tmp_id );
+	Unfold_Workflow::complete_job( $inst_tmp_id, $soft_data, array( 'model' => 'smoke-test', 'usage' => array( 'output_tokens' => 42 ) ) );
+	$inst_payload = Unfold_Rest::project_payload( $inst_tmp_id );
+	if ( empty( $inst_payload['direct_publish'] ) ) {
+		throw new RuntimeException( 'Expected direct_publish=true for instructor-authored project.' );
+	}
+	if ( true !== Unfold_Workflow::submit( $inst_tmp_id ) || 'approved' !== Unfold_Workflow::state( $inst_tmp_id ) || 'publish' !== get_post_status( $inst_tmp_id ) ) {
+		throw new RuntimeException( 'Expected instructor-authored project to publish directly without pending instructor review.' );
+	}
+
 	$html = Unfold_Render::project_html( $tmp_id, Unfold_Store::get( $tmp_id ), false );
 	if ( false === strpos( $html, 'Autonomous Warehouse Fleet Management' ) ) {
 		throw new RuntimeException( 'Expected rendered project HTML to include title.' );
 	}
 } finally {
 	wp_delete_post( $tmp_id, true );
+	wp_delete_post( $inst_tmp_id, true );
+	wp_delete_user( $student_id );
 }
 
 echo "OK: Unfold Studio smoke test passed.\n";
