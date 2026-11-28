@@ -36,6 +36,8 @@ body.single-unfold_project .uf-site-header { position: relative; }
 }
 .uf-site-header .wp-block-navigation a { text-decoration: none; padding: 6px 10px; border-radius: 8px; transition: background .15s, color .15s; }
 .uf-site-header .wp-block-navigation a:hover { color: var(--uf-ink-c); background: var(--uf-panel-c); }
+.uf-site-header .wp-block-navigation .uf-nav-upload a { color: var(--uf-signal); font-weight: 600; background: var(--uf-signal-soft); }
+.uf-site-header .wp-block-navigation .uf-nav-upload a:hover { background: var(--uf-signal); color: #fff; }
 .uf-site-header .wp-block-navigation { margin-left: auto; }
 .uf-account { display: inline-flex; align-items: center; gap: 8px; font-size: .9rem; font-weight: 600; text-decoration: none; color: #fff !important; background: var(--uf-ink-c); border-radius: 10px; padding: 9px 16px; white-space: nowrap; transition: background .15s, transform .15s, box-shadow .15s; box-shadow: 0 1px 2px rgba(15, 23, 32, .08); }
 .uf-account:hover { background: var(--uf-signal); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(11, 138, 122, .2); }
