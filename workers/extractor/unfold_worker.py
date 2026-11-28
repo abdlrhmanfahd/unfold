@@ -1145,7 +1145,7 @@ class LLMClient:
                     "temperature": 0.1,
                 },
             }
-            r = requests.post(url, params={"key": key}, json=payload, timeout=180)
+            r = requests.post(url, headers={"x-goog-api-key": key}, json=payload, timeout=180)
             if r.status_code in (401, 403):
                 raise RuntimeError("Gemini API key is invalid or unauthorized. Check GEMINI_API_KEY.")
             if r.status_code == 429:
@@ -1865,31 +1865,41 @@ def build_cover_prompt(data: dict) -> str:
     return COVER_PROMPT_TEMPLATE.format(description=raw)
 
 
+GEMINI_IMAGE_MODELS = (
+    "gemini-2.5-flash-image",
+    "gemini-2.5-flash-image-preview",
+    "gemini-2.0-flash-exp-image-generation",
+)
+
+
 def generate_cover_image(client: LLMClient, data: dict) -> tuple[bytes, str, str] | None:
-    """Generate a 2D vector illustration for the project card using configured AI or free fallback."""
+    """Generate a 2D vector illustration for the project card using configured AI or opt-in fallback."""
     prompt = build_cover_prompt(data)
 
     if client.provider == "gemini":
         key = client.api_key or os.environ.get("GEMINI_API_KEY") or read_secret_file("gemini-key.txt")
         if key:
-            try:
-                url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent"
-                r = requests.post(
-                    url,
-                    params={"key": key},
-                    json={
-                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                        "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
-                    },
-                    timeout=60,
-                )
-                if r.ok:
-                    for pt in (((r.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or []):
-                        inl = pt.get("inlineData") or {}
-                        if inl.get("data"):
-                            return base64.standard_b64decode(inl["data"]), inl.get("mimeType") or "image/png", prompt
-            except Exception:  # noqa: BLE001
-                log.debug("gemini image generation unavailable, trying fallback", exc_info=True)
+            for img_model in GEMINI_IMAGE_MODELS:
+                try:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{img_model}:generateContent"
+                    r = requests.post(
+                        url,
+                        headers={"x-goog-api-key": key},
+                        json={
+                            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                            "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
+                        },
+                        timeout=60,
+                    )
+                    if r.ok:
+                        for pt in (((r.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or []):
+                            inl = pt.get("inlineData") or {}
+                            if inl.get("data"):
+                                return base64.standard_b64decode(inl["data"]), inl.get("mimeType") or "image/png", prompt
+                    else:
+                        log.warning("gemini image model %s returned HTTP %s", img_model, r.status_code)
+                except Exception:  # noqa: BLE001
+                    log.debug("gemini image generation unavailable for %s", img_model, exc_info=True)
 
     if client.provider == "openai_compat" and client.base_url and "api.openai.com" in client.base_url.lower():
         key = client.api_key or os.environ.get("UNFOLD_AI_API_KEY") or read_secret_file("ai-key.txt")
@@ -1908,7 +1918,7 @@ def generate_cover_image(client: LLMClient, data: dict) -> tuple[bytes, str, str
             except Exception:  # noqa: BLE001
                 log.debug("openai image generation unavailable, trying fallback", exc_info=True)
 
-    if os.environ.get("UNFOLD_IMAGE_FALLBACK", "1") != "0":
+    if os.environ.get("UNFOLD_IMAGE_FALLBACK", "0") == "1":
         try:
             url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=640&nologo=true"
             r = requests.get(url, timeout=45)

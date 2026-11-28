@@ -244,14 +244,39 @@ class ExtractorWorkerTests(unittest.TestCase):
         fake_resp.ok = True
         fake_resp.headers = {"Content-Type": "image/png"}
         fake_resp.content = fake_png
-        with mock.patch.object(uw.requests, "get", return_value=fake_resp) as get_mock:
-            res = uw.generate_cover_image(uw.LLMClient("local_rules"), {"meta": {"title": "Fleet Robot", "short_description": "Multi-robot path planning"}})
+        sample = {"meta": {"title": "Fleet Robot", "short_description": "Multi-robot path planning"}}
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("UNFOLD_IMAGE_FALLBACK", None)
+            self.assertIsNone(uw.generate_cover_image(uw.LLMClient("local_rules"), sample))
+        with mock.patch.dict(os.environ, {"UNFOLD_IMAGE_FALLBACK": "1"}):
+            with mock.patch.object(uw.requests, "get", return_value=fake_resp) as get_mock:
+                res = uw.generate_cover_image(uw.LLMClient("local_rules"), sample)
+                self.assertIsNotNone(res)
+                img_bytes, mime, prompt = res
+                self.assertEqual(img_bytes, fake_png)
+                self.assertEqual(mime, "image/png")
+                self.assertIn("Fleet Robot", prompt)
+                self.assertTrue(get_mock.called)
+
+    def test_generate_cover_image_uses_gemini_25_flash_image_with_header_key(self):
+        import base64 as b64
+        fake_png = b"\x89PNG\r\n\x1a\n" + b"1" * 1024
+        fake_resp = mock.Mock()
+        fake_resp.ok = True
+        fake_resp.json.return_value = {
+            "candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": b64.standard_b64encode(fake_png).decode()}}]}}]
+        }
+        with mock.patch.object(uw.requests, "post", return_value=fake_resp) as post_mock:
+            client = uw.LLMClient("gemini", api_key="demo-gemini-value-1")
+            res = uw.generate_cover_image(client, {"meta": {"title": "Safe Stopping", "short_description": "LiDAR obstacle avoidance"}})
             self.assertIsNotNone(res)
             img_bytes, mime, prompt = res
             self.assertEqual(img_bytes, fake_png)
             self.assertEqual(mime, "image/png")
-            self.assertIn("Fleet Robot", prompt)
-            self.assertTrue(get_mock.called)
+            self.assertIn("2D vector illustration", prompt)
+            self.assertIn("gemini-2.5-flash-image:generateContent", post_mock.call_args.args[0])
+            self.assertEqual(post_mock.call_args.kwargs["headers"]["x-goog-api-key"], "demo-gemini-value-1")
+            self.assertNotIn("params", post_mock.call_args.kwargs)
 
     def test_build_context_includes_extra_docs_md_csv_stats_and_deep_code(self):
         docx_buf = io.BytesIO()
